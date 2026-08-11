@@ -14,7 +14,7 @@
 #
 # Working latent-Gaussian factor model:
 #
-#   Z_i = Lambda f_i + epsilon_i
+#   Z_ij = alpha_j + lambda_j' f_i + epsilon_ij
 #
 # Independent mixture factor model:
 #
@@ -23,7 +23,8 @@
 # Pretraining algorithm:
 #
 #   repeat augmentation:
-#       1. Compute SVD scores S from the current latent Z.
+#       1. Center the current latent Z by the current alpha estimate and
+#          compute SVD scores S.
 #       2. Rotate S by an orthogonal matrix R.
 #       3. At the current orientation, fit a univariate Gaussian mixture to
 #          each factor coordinate.  Either choose G_h by BIC or keep a supplied
@@ -31,8 +32,8 @@
 #       4. Improve R using pairwise Givens rotations.  Each pairwise angle is
 #          selected by grid search followed by local one-dimensional
 #          optimization.
-#       5. Estimate working loadings Lambda from Z ~ F Lambda'.
-#       6. Fix Psi = I, then sample or average Z | X, F, Lambda, Psi.
+#       5. Estimate alpha and working loadings Lambda from Z ~ alpha + F Lambda'.
+#       6. Fix Psi = I, then sample or average Z | X, F, alpha, Lambda, Psi.
 #   end
 #
 # Main exported functions in this file:
