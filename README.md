@@ -1,0 +1,52 @@
+# Factorial Factor Mixtures
+
+This repository collects the reproducible code, selected results, and writeups for factorial factor mixture analyses.
+
+The current contents are organized around two analysis tracks:
+
+1. `experiments/sample_size_intercepts_centered`: simulations comparing the proposed binary probit independent-mixture factor method against a correctly specified joint-mixture factor analyzer with probit augmentation and full Gibbs sampling.
+2. `experiments/ifeval`: IFEval rank selection, predictive comparison against ordinary binary probit factor models, tuned sparse loading estimation, and factor interpretation/visualization.
+
+The main implementation lives in `R/`. Runnable scripts are kept under `scripts/`, with experiment-specific copies preserved so the current results can be reproduced before a deeper refactor.
+
+## Current Simulation
+
+The active sample-size experiment uses:
+
+- `H in {3, 4}`
+- `G in {2, 3}`
+- `n in {100, 500, 1000, 2000}`
+- `p = 500`
+- `25` Monte Carlo repetitions per setting
+- two loading designs: `few-positive-cross` and `dense-signed-cross`
+- item intercepts generated in an IFEval-like pattern
+- centered augmented probit SVD initialization
+- MAP refinement for the proposed method
+- 2000 Gibbs iterations for the joint-mixture comparator, with 1000 burn-in draws
+
+Selected checkpoint plots and tables are stored in `results/selected_plots/sample_size` and `results/selected_tables/sample_size`.
+
+## IFEval Analysis
+
+The IFEval analysis includes:
+
+- missing-aware rank selection by held-out probit likelihood
+- ordinary binary probit factor comparison
+- tuned sparse loading penalty for the mixture model
+- selected `H = 3, G = 3` loading interpretation
+- cross-loading summaries
+- 3D factor visualizations
+- LaTeX writeup and rendered PDF in `writeup/`
+
+The cleaned IFEval data used by the scripts live in `data/ifeval`.
+
+## Remote GitHub Repository
+
+This is currently a local git repository scaffold. To publish it, create an empty GitHub repository, then run:
+
+```sh
+git remote add origin git@github.com:USER/factorial-factor-mixtures.git
+git push -u origin main
+```
+
+If using HTTPS instead of SSH, replace the remote URL with the HTTPS URL GitHub provides.

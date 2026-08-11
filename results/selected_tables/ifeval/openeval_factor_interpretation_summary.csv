@@ -1,0 +1,7 @@
+"factor","direction","n_items","mean_signed_loading","mean_abs_loading","mean_item_accuracy","top_benchmarks","top_semantic_forms"
+"F1","positive",75,1.19616893945841,1.19616893945841,0.736830601092896,"ifeval=75","instruction/constraint following"
+"F1","negative",75,0.0511357834091453,0.0537144018369697,0.599781420765027,"ifeval=75","instruction/constraint following"
+"F2","positive",75,0.558871455814844,0.558871455814844,0.550928961748634,"ifeval=75","instruction/constraint following"
+"F2","negative",75,-0.00372017358198854,0.00372017358198854,0.776939890710382,"ifeval=75","instruction/constraint following"
+"F3","positive",75,0.527148890357581,0.527148890357581,0.692896174863388,"ifeval=75","instruction/constraint following"
+"F3","negative",75,-0.0402901505070955,0.0402901505070955,0.777486338797814,"ifeval=75","instruction/constraint following"

@@ -1,0 +1,20 @@
+.DS_Store
+.Rhistory
+.RData
+.Rproj.user/
+
+# Large/generated fitting artifacts
+*.rds
+*.RDS
+*.log
+*.aux
+*.out
+
+# Full simulation output directories can be regenerated from scripts.
+results/full/
+results/raw/
+
+# Temporary checkpoints produced while long simulations are running.
+*_checkpoint.csv
+run.pid
+screenlog.*

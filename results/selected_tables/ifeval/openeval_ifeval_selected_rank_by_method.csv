@@ -1,0 +1,4 @@
+"method","best_H","best_mean_heldout_loglik_per_response","best_se_heldout_loglik_per_response","one_se_H","one_se_threshold","mean_fit_seconds_at_best_H"
+"mixture_probit_G2",3,-0.276161109432716,0.00391498087977707,3,-0.280076090312494,3.285
+"mixture_probit_G3",3,-0.275621115286984,0.00325325314901753,3,-0.278874368436002,3.43366666666667
+"ordinary_probit_factor",3,-0.279247600722885,0.00411457714555936,3,-0.283362177868444,3.062

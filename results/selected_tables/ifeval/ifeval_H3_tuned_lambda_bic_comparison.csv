@@ -1,0 +1,6 @@
+"model","version","lambda_l1","H","G","binary_loglik","loglik_per_response","nnz_lambda","mixture_df","effective_df","bic","delta_bic_vs_best"
+"independent-mixture probit","full penalized",10,3,3,-15541.6025766055,-0.254780370108288,765,24,1655,49319.0363851333,1079.22646419255
+"independent-mixture probit","hard-thresholded |lambda| >= 0.5",10,3,3,-16941.2680737046,-0.277725706126305,413,24,1303,48239.8099209408,0
+"ordinary binary probit","full penalized",10,3,NA,-14316.9574840478,-0.234704221049964,1007,0,1873,49271.8073532258,1031.99743228497
+"ordinary binary probit","hard-thresholded |lambda| >= 0.5",10,3,NA,-25754.2680767225,-0.422201116011845,85,0,951,61987.2524685859,13747.4425476451
+"ordinary binary probit previous","full penalized",2,3,NA,-13504.1393669418,-0.221379333884293,1367,0,2233,51612.8776105498,3373.06768960902

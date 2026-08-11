@@ -1,0 +1,2 @@
+"lambda_l1_penalty","binary_loglik","binary_loglik_per_response","effective_df","nnz_lambda","lambda_density","n_abs_gt_0_1","n_abs_gt_0_5","n_abs_gt_1_0","mean_abs_lambda","median_abs_lambda","aic","bic","refinement_iterations","selected_refinement_iteration","elapsed_sec","selected_by_bic","selected_by_aic"
+10,-15549.3882799049,-0.254908004588604,1649,759,0.506,673,413,123,0.293475469160351,0.00779991334592009,34396.7765598097,49268.4960168731,4,4,4.44300000000001,TRUE,FALSE
