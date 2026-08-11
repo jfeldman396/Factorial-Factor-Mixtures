@@ -1,5 +1,7 @@
 # Reproduction Guide
 
+For the most complete instructions, see `REPLICATION.md`.
+
 All commands below assume the working directory is the repository root:
 
 ```sh

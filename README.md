@@ -9,6 +9,8 @@ The current contents are organized around two analysis tracks:
 
 The main implementation lives in `R/`. Runnable scripts are kept under `scripts/`, with experiment-specific copies preserved so the current results can be reproduced before a deeper refactor.
 
+See `REPLICATION.md` for step-by-step instructions to rerun the IFEval analysis and the sample-size simulation.
+
 ## Current Simulation
 
 The active sample-size experiment uses:
