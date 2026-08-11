@@ -5,6 +5,7 @@ This guide explains how to replicate the two analysis tracks in this repository:
 1. the IFEval empirical analysis;
 2. the sample-size simulation comparing the proposed factorial factor-mixture method with a joint-mixture Gibbs sampler.
 
+Run these commands in a local macOS Terminal, not in the GitHub web interface.
 All commands assume the repository root is the working directory:
 
 ```sh
@@ -278,6 +279,8 @@ Primary outputs:
 For a fast check of the code path:
 
 ```sh
+cd "/Users/joefeldman/Documents/Deep Factor Models/factorial-factor-mixtures"
+
 OUT_DIR=results/full/smoke_sample_size \
 H_VALUES=3 \
 G_VALUES=2 \
