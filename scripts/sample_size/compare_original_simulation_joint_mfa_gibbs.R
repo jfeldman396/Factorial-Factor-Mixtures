@@ -20,14 +20,9 @@ options(stringsAsFactors = FALSE)
 file_arg <- commandArgs(FALSE)
 file_arg <- sub("^--file=", "", file_arg[grepl("^--file=", file_arg)])
 script_dir <- if (length(file_arg) > 0L) dirname(normalizePath(file_arg[1L])) else getwd()
-if (!file.exists(file.path(script_dir, "binary_probit_pretraining_algorithm_commented.R"))) {
-  candidate_dir <- file.path(getwd(), "binary_probit_model_simulation_handoff", "code")
-  if (file.exists(file.path(candidate_dir, "binary_probit_pretraining_algorithm_commented.R"))) {
-    script_dir <- candidate_dir
-  }
-}
-source(file.path(script_dir, "binary_probit_pretraining_algorithm_commented.R"))
-source(file.path(script_dir, "binary_probit_refinement_algorithm_commented.R"))
+repo_root <- normalizePath(file.path(script_dir, "../.."))
+source(file.path(repo_root, "R", "binary_probit_pretraining.R"))
+source(file.path(repo_root, "R", "binary_probit_refinement.R"))
 
 get_env <- function(name, default, FUN = identity) {
   value <- Sys.getenv(name, unset = "")
@@ -1140,8 +1135,6 @@ fit_ours <- function(X, H, G, seed) {
   fit <- fit_binary_probit_pretrain_then_refine(
     X = X,
     H = H,
-    G_max = G,
-    pretrain_G_selection = "fixed",
     G_fixed = G,
     n_aug_iter = pretrain_aug_iter,
     z_update = "expectation",
@@ -1152,8 +1145,6 @@ fit_ours <- function(X, H, G, seed) {
     center_Z_for_svd = center_Z_for_svd,
     return_best_iteration = pretrain_return_best_iteration,
     n_refine_iter = refine_iter,
-    refine_G_selection = "fixed",
-    refine_G_max = G,
     factor_update = "marginal",
     lambda_l1_penalty = lambda_l1_penalty,
     mixture_max_iter = mixture_max_iter,

@@ -26,9 +26,8 @@
 #       1. Center the current latent Z by the current alpha estimate and
 #          compute SVD scores S.
 #       2. Rotate S by an orthogonal matrix R.
-#       3. At the current orientation, fit a univariate Gaussian mixture to
-#          each factor coordinate.  Either choose G_h by BIC or keep a supplied
-#          fixed G_h.
+#       3. At the current orientation, fit a fixed-G univariate Gaussian
+#          mixture to each factor coordinate.
 #       4. Improve R using pairwise Givens rotations.  Each pairwise angle is
 #          selected by grid search followed by local one-dimensional
 #          optimization.
@@ -483,7 +482,7 @@ simulate_binary_probit_independent_mixture_factor_model <- function(
 }
 
 # ----------------------------------------------------------------------------
-# Univariate Gaussian mixture fitting and BIC selection
+# Univariate Gaussian mixture fitting
 # ----------------------------------------------------------------------------
 
 log_dmix_1d <- function(x, fit) {
@@ -684,107 +683,10 @@ fit_gmm_1d <- function(
   best
 }
 
-select_gmm_bic <- function(
-    x,
-    G_max = 5L,
-    n_starts = 8L,
-    max_iter = 20L,
-    mixture_penalty_multiplier = 1,
-    mixture_update = c("map", "mle"),
-    mu_prior_mean = 0,
-    mu_prior_kappa = 0.01,
-    var_prior_shape = 2,
-    var_prior_scale = 0.3,
-    weight_prior_alpha = 1,
-    previous_fit = NULL) {
-  mixture_update <- match.arg(mixture_update)
-  x <- as.numeric(x)
-  n <- length(x)
-  G_max <- min(as.integer(G_max), max(1L, floor(n / 10)))
-
-  fits <- vector("list", G_max)
-  bic <- numeric(G_max)
-
-  for (G in seq_len(G_max)) {
-    # Fit each candidate G.  If the previous fit had this same G, use it as a
-    # warm start so refinement does not ignore useful pretraining information.
-    init_G <- NULL
-    if (!is.null(previous_fit) && length(previous_fit$pi) == G) {
-      init_G <- previous_fit
-    }
-
-    # Univariate Gaussian mixture degrees of freedom:
-    # (G - 1) weights + G means + G variances = 3G - 1.
-    fits[[G]] <- fit_gmm_1d(
-      x,
-      G = G,
-      n_starts = n_starts,
-      max_iter = max_iter,
-      mixture_update = mixture_update,
-      mu_prior_mean = mu_prior_mean,
-      mu_prior_kappa = mu_prior_kappa,
-      var_prior_shape = var_prior_shape,
-      var_prior_scale = var_prior_scale,
-      weight_prior_alpha = weight_prior_alpha,
-      init = init_G
-    )
-    n_parameters <- 3 * G - 1
-    bic[G] <- -2 * fits[[G]]$loglik +
-      mixture_penalty_multiplier * n_parameters * log(n)
-  }
-
-  # Smaller BIC is better; return both the winner and the full BIC path.
-  best_G <- which.min(bic)
-  best <- fits[[best_G]]
-  best$bic <- bic[best_G]
-  best$all_bic <- bic
-  best$all_fits <- fits
-  best
-}
-
-fit_column_mixtures_bic <- function(
-    F,
-    G_max = 5L,
-    n_starts = 8L,
-    max_iter = 20L,
-    mixture_penalty_multiplier = 1,
-    mixture_update = c("map", "mle"),
-    mu_prior_mean = 0,
-    mu_prior_kappa = 0.01,
-    var_prior_shape = 2,
-    var_prior_scale = 0.3,
-    weight_prior_alpha = 1,
-    previous_fits = NULL,
-    parallel = FALSE,
-    workers = NULL) {
-  mixture_update <- match.arg(mixture_update)
-  H <- ncol(F)
-
-  # Because the model assumes independent factor coordinates, each marginal
-  # mixture can be fit separately.
-  parallel_lapply(seq_len(H), function(h) {
-    prev <- if (!is.null(previous_fits)) previous_fits[[h]] else NULL
-    select_gmm_bic(
-      F[, h],
-      G_max = G_max,
-      n_starts = n_starts,
-      max_iter = max_iter,
-      mixture_penalty_multiplier = mixture_penalty_multiplier,
-      mixture_update = mixture_update,
-      mu_prior_mean = mu_prior_mean,
-      mu_prior_kappa = mu_prior_kappa,
-      var_prior_shape = var_prior_shape,
-      var_prior_scale = var_prior_scale,
-      weight_prior_alpha = weight_prior_alpha,
-      previous_fit = prev
-    )
-  }, parallel = parallel, workers = workers)
-}
-
 normalize_G_fixed <- function(G_fixed, H) {
   # Accept either one common G for all factors or one G_h per factor.
   if (is.null(G_fixed)) {
-    stop("G_fixed must be supplied when pretrain_G_selection = 'fixed'.")
+    stop("G_fixed must be supplied.")
   }
 
   if (length(G_fixed) == 1L) G_fixed <- rep(G_fixed, H)
@@ -842,12 +744,9 @@ fit_column_mixtures_fixed_G <- function(
 
 fit_column_mixtures <- function(
     F,
-    G_selection = c("bic", "fixed"),
-    G_max = 5L,
     G_fixed = NULL,
     n_starts = 8L,
     max_iter = 20L,
-    mixture_penalty_multiplier = 1,
     mixture_update = c("map", "mle"),
     mu_prior_mean = 0,
     mu_prior_kappa = 0.01,
@@ -857,33 +756,11 @@ fit_column_mixtures <- function(
     previous_fits = NULL,
     parallel = FALSE,
     workers = NULL) {
-  G_selection <- match.arg(G_selection)
-  mixture_update <- match.arg(mixture_update)
-
-  if (G_selection == "fixed") {
-    return(fit_column_mixtures_fixed_G(
-      F = F,
-      G_fixed = G_fixed,
-      n_starts = n_starts,
-      max_iter = max_iter,
-      mixture_update = mixture_update,
-      mu_prior_mean = mu_prior_mean,
-      mu_prior_kappa = mu_prior_kappa,
-      var_prior_shape = var_prior_shape,
-      var_prior_scale = var_prior_scale,
-      weight_prior_alpha = weight_prior_alpha,
-      previous_fits = previous_fits,
-      parallel = parallel,
-      workers = workers
-    ))
-  }
-
-  fit_column_mixtures_bic(
+  fit_column_mixtures_fixed_G(
     F = F,
-    G_max = G_max,
+    G_fixed = G_fixed,
     n_starts = n_starts,
     max_iter = max_iter,
-    mixture_penalty_multiplier = mixture_penalty_multiplier,
     mixture_update = mixture_update,
     mu_prior_mean = mu_prior_mean,
     mu_prior_kappa = mu_prior_kappa,
@@ -900,18 +777,6 @@ mixture_loglik_total <- function(F, fits) {
   sum(vapply(seq_len(ncol(F)), function(h) {
     sum(log_dmix_1d(F[, h], fits[[h]]))
   }, numeric(1)))
-}
-
-mixture_bic_score <- function(F, fits, mixture_penalty_multiplier = 1) {
-  n <- nrow(F)
-
-  # This is the rotation objective: marginal mixture log likelihood minus the
-  # BIC-style complexity penalty for all selected univariate mixtures.
-  penalty <- sum(vapply(fits, function(fit) {
-    G <- length(fit$pi)
-    0.5 * mixture_penalty_multiplier * (3 * G - 1) * log(n)
-  }, numeric(1)))
-  mixture_loglik_total(F, fits) - penalty
 }
 
 # ----------------------------------------------------------------------------
@@ -1180,14 +1045,11 @@ jacobi_mixture_sweep <- function(S, R, fits, grid_size = 21L) {
 
 estimate_mixture_ica_unknown_G <- function(
     S,
-    G_selection = c("bic", "fixed"),
-    G_max = 5L,
     G_fixed = NULL,
     n_random_starts = 1L,
     max_outer = 4L,
     n_mix_starts = 3L,
     mixture_max_iter = 20L,
-    mixture_penalty_multiplier = 1,
     mixture_update = c("map", "mle"),
     mu_prior_mean = 0,
     mu_prior_kappa = 0.01,
@@ -1205,7 +1067,6 @@ estimate_mixture_ica_unknown_G <- function(
     parallel = FALSE,
     workers = NULL,
     verbose = TRUE) {
-  G_selection <- match.arg(G_selection)
   mixture_update <- match.arg(mixture_update)
   rotation_sweep <- match.arg(rotation_sweep)
   disjoint_pairing <- match.arg(disjoint_pairing)
@@ -1215,9 +1076,7 @@ estimate_mixture_ica_unknown_G <- function(
   S <- as.matrix(S)
   H <- ncol(S)
 
-  if (G_selection == "fixed") {
-    G_fixed <- normalize_G_fixed(G_fixed, H)
-  }
+  G_fixed <- normalize_G_fixed(G_fixed, H)
 
   # Use identity plus random orthogonal starts to reduce local optimum risk.
   starts <- list(identity = diag(H))
@@ -1235,12 +1094,9 @@ estimate_mixture_ica_unknown_G <- function(
     # Initial mixture fits at the starting orientation.
     fits <- fit_column_mixtures(
       F,
-      G_selection = G_selection,
-      G_max = G_max,
       G_fixed = G_fixed,
       n_starts = n_mix_starts,
       max_iter = mixture_max_iter,
-      mixture_penalty_multiplier = mixture_penalty_multiplier,
       mixture_update = mixture_update,
       mu_prior_mean = mu_prior_mean,
       mu_prior_kappa = mu_prior_kappa,
@@ -1254,12 +1110,9 @@ estimate_mixture_ica_unknown_G <- function(
     refit_current <- function(F_current, previous_fits) {
       fit_column_mixtures(
         F_current,
-        G_selection = G_selection,
-        G_max = G_max,
         G_fixed = G_fixed,
         n_starts = n_mix_starts,
         max_iter = mixture_max_iter,
-        mixture_penalty_multiplier = mixture_penalty_multiplier,
         mixture_update = mixture_update,
         mu_prior_mean = mu_prior_mean,
         mu_prior_kappa = mu_prior_kappa,
@@ -1274,8 +1127,7 @@ estimate_mixture_ica_unknown_G <- function(
 
     for (outer in seq_len(max_outer)) {
       # Alternate rotation updates with re-estimating the one-dimensional
-      # mixtures.  Component counts are either fixed by G_fixed or reselected
-      # by BIC, depending on G_selection.
+      # mixtures. Component counts are fixed at the supplied G_fixed values.
       if (rotation_sweep == "full") {
         sweep_out <- jacobi_mixture_sweep(
           S = S,
@@ -1371,17 +1223,14 @@ estimate_mixture_ica_unknown_G <- function(
     }
 
     # Rotation starts are compared by the profiled marginal mixture likelihood.
-    # When G is fixed, there is no model-selection penalty to apply here.
     loglik <- mixture_loglik_total(F, fits)
-    penalized_score <- mixture_bic_score(F, fits, mixture_penalty_multiplier)
     list(
       F_hat = F,
       R = R,
       fits = fits,
       G_hat = vapply(fits, function(z) length(z$pi), integer(1)),
       loglik = loglik,
-      penalized_score = penalized_score,
-      G_selection = G_selection,
+      G_selection = "fixed",
       mixture_update = mixture_update,
       rotation_sweep = rotation_sweep,
       disjoint_pairing = disjoint_pairing,
@@ -1400,16 +1249,13 @@ estimate_mixture_ica_unknown_G <- function(
   )
   names(results) <- names(starts)
 
-  # Return the best rotation start and retain scores for diagnostics.  The
-  # rotation initialization itself is likelihood based; BIC-style penalties are
-  # only used inside the optional unknown-G mixture fitting path.
+  # Return the best rotation start and retain scores for diagnostics.
   scores <- vapply(results, function(z) z$loglik, numeric(1))
   best <- which.max(scores)
   out <- results[[best]]
   out$start_name <- names(results)[best]
   out$all_start_scores <- scores
   out$all_start_loglik <- scores
-  out$all_start_penalized_scores <- vapply(results, function(z) z$penalized_score, numeric(1))
   out
 }
 
@@ -1801,8 +1647,6 @@ fit_binary_probit_pretraining <- function(
     H_prune_min_loading_energy_share = 0,
     H_prune_likelihood_penalty_multiplier = 1,
     H_prune_min_keep = 1L,
-    pretrain_G_selection = c("bic", "fixed"),
-    G_max = 5L,
     G_fixed = NULL,
     n_aug_iter = 4L,
     z_update = c("sample", "expectation"),
@@ -1811,7 +1655,6 @@ fit_binary_probit_pretraining <- function(
     max_outer = 4L,
     n_mix_starts = 3L,
     mixture_max_iter = 20L,
-    mixture_penalty_multiplier = 1,
     mixture_update = c("map", "mle"),
     mu_prior_mean = 0,
     mu_prior_kappa = 0.01,
@@ -1826,6 +1669,7 @@ fit_binary_probit_pretraining <- function(
       "probit_loglik",
       "mixture_loglik",
       "combined",
+      "rotation_score",
       "penalized_score",
       "negative_reconstruction_mse"
     ),
@@ -1846,7 +1690,6 @@ fit_binary_probit_pretraining <- function(
     seed = 20260715L,
     verbose = TRUE,
     ...) {
-  pretrain_G_selection <- match.arg(pretrain_G_selection)
   H_selection_strategy <- match.arg(H_selection_strategy)
   z_update <- match.arg(z_update)
   pretrain_objective <- match.arg(pretrain_objective)
@@ -1918,9 +1761,7 @@ fit_binary_probit_pretraining <- function(
   }
 
   H <- as.integer(H)
-  if (pretrain_G_selection == "fixed") {
-    G_fixed <- normalize_G_fixed(G_fixed, H)
-  }
+  G_fixed <- normalize_G_fixed(G_fixed, H)
   history <- vector("list", n_aug_iter)
   iteration_trace <- if (isTRUE(store_iteration_trace)) vector("list", n_aug_iter) else NULL
   candidate_snapshots <- if (isTRUE(return_best_iteration)) vector("list", n_aug_iter) else NULL
@@ -1942,19 +1783,15 @@ fit_binary_probit_pretraining <- function(
     S <- svd_out$S
 
     # Step 2: rotate the SVD basis toward independent non-Gaussian mixture
-    # coordinates.  The marginal mixture counts are either selected by BIC or
-    # fixed at the supplied G_fixed values.
+    # coordinates with fixed marginal mixture counts.
     rotation_start <- Sys.time()
     rotation_out <- estimate_mixture_ica_unknown_G(
       S = S,
-      G_selection = pretrain_G_selection,
-      G_max = G_max,
       G_fixed = G_fixed,
       n_random_starts = n_random_starts,
       max_outer = max_outer,
       n_mix_starts = n_mix_starts,
       mixture_max_iter = mixture_max_iter,
-      mixture_penalty_multiplier = mixture_penalty_multiplier,
       mixture_update = mixture_update,
       mu_prior_mean = mu_prior_mean,
       mu_prior_kappa = mu_prior_kappa,
@@ -2028,11 +1865,6 @@ fit_binary_probit_pretraining <- function(
       rotation_out$fits <- prune_out$mixture_fits
       rotation_out$G_hat <- vapply(rotation_out$fits, function(z) length(z$pi), integer(1))
       rotation_out$loglik <- mixture_loglik_total(F_hat, rotation_out$fits)
-      rotation_out$penalized_score <- mixture_bic_score(
-        F_hat,
-        rotation_out$fits,
-        mixture_penalty_multiplier
-      )
       loading_out$Lambda <- prune_out$Lambda
       loading_out$Lambda_ls <- loading_out$Lambda_ls[, prune_out$kept, drop = FALSE]
       loading_out$fitted <- sweep(F_hat %*% t(loading_out$Lambda), 2L, alpha_hat, "+")
@@ -2040,9 +1872,7 @@ fit_binary_probit_pretraining <- function(
       responsibilities <- prune_out$responsibilities
       class_map <- prune_out$class_map
       H <- ncol(F_hat)
-      if (pretrain_G_selection == "fixed") {
-        G_fixed <- normalize_G_fixed(G_fixed[prune_out$kept], H)
-      }
+      G_fixed <- normalize_G_fixed(G_fixed[prune_out$kept], H)
       H_pruned <- TRUE
       pruned_factors <- prune_out$dropped
       prune_diagnostics <- prune_out$diagnostics
@@ -2084,8 +1914,9 @@ fit_binary_probit_pretraining <- function(
       full_data_loglik = full_data_loglik,
       lpretrain = full_data_loglik,
       probit_loglik = probit_loglik,
-      combined = rotation_out$penalized_score - 0.5 * length(X) * log(pmax(reconstruction_mse, 1e-12)),
-      penalized_score = rotation_out$penalized_score,
+      combined = rotation_out$loglik - 0.5 * length(X) * log(pmax(reconstruction_mse, 1e-12)),
+      rotation_score = rotation_out$loglik,
+      penalized_score = rotation_out$loglik,
       mixture_loglik = rotation_out$loglik,
       negative_reconstruction_mse = -reconstruction_mse
     )
@@ -2134,7 +1965,8 @@ fit_binary_probit_pretraining <- function(
       probit_loglik = probit_loglik,
       full_data_loglik = full_data_loglik,
       mixture_loglik = rotation_out$loglik,
-      penalized_score = rotation_out$penalized_score,
+      rotation_score = rotation_out$loglik,
+      penalized_score = rotation_out$loglik,
       reconstruction_mse = reconstruction_mse,
       pretrain_objective_name = pretrain_objective,
       pretrain_objective = pretrain_objective_value,
@@ -2149,7 +1981,7 @@ fit_binary_probit_pretraining <- function(
       H_before_prune = H_before_prune,
       H_after_prune = H,
       n_pruned_factors = length(pruned_factors),
-      pretrain_G_selection = pretrain_G_selection,
+      pretrain_G_selection = "fixed",
       mixture_update = mixture_update,
       svd_seconds = svd_seconds,
       rotation_seconds = rotation_seconds,
@@ -2211,7 +2043,8 @@ fit_binary_probit_pretraining <- function(
         probit_loglik = probit_loglik,
         full_data_loglik = full_data_loglik,
         mixture_loglik = rotation_out$loglik,
-        penalized_score = rotation_out$penalized_score,
+        rotation_score = rotation_out$loglik,
+        penalized_score = rotation_out$loglik,
         pretrain_objective = pretrain_objective_value,
         relative_objective_change = relative_objective_change,
         H_before_prune = H_before_prune,
@@ -2327,7 +2160,7 @@ fit_binary_probit_pretraining <- function(
   current$mixture_max_iter <- mixture_max_iter
   current$fix_psi_identity <- TRUE
   current$estimate_intercept <- estimate_intercept
-  current$pretrain_G_selection <- pretrain_G_selection
+  current$pretrain_G_selection <- "fixed"
   current$G_fixed <- G_fixed
   current$mixture_update <- mixture_update
   current$rotation_sweep <- rotation_sweep

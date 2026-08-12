@@ -8,8 +8,8 @@
 # file has been sourced, because the refinement uses the same univariate mixture
 # fitting utilities:
 #
-#   source("binary_probit_pretraining_algorithm_commented.R")
-#   source("binary_probit_refinement_algorithm_commented.R")
+#   source("R/binary_probit_pretraining.R")
+#   source("R/binary_probit_refinement.R")
 #
 # Refined model:
 #
@@ -34,11 +34,7 @@
 #        a. Update each f_i by L-BFGS-B under the binary probit likelihood
 #           plus independent mixture log prior.
 #        b. Update Lambda by itemwise probit regressions given the new F.
-#        c. Refit each marginal mixture.  Either:
-#             - keep G_h fixed from the current fit, or
-#             - choose G_h by BIC over 1,...,G_max.
-#        d. Optionally prune small or weakly separated mixture components,
-#           then refit the pruned mixtures with fixed component counts.
+#        c. Refit the fixed-G marginal mixture distribution for each factor.
 #   4. Return refined F, Lambda, mixtures, labels, and the objective history.
 # ============================================================================
 
@@ -57,7 +53,7 @@ script_dir <- local({
 
 if (!exists("fit_binary_probit_pretraining", mode = "function") ||
     !exists("parallel_lapply", mode = "function")) {
-  source(file.path(script_dir, "binary_probit_pretraining_algorithm_commented.R"))
+  source(file.path(script_dir, "binary_probit_pretraining.R"))
 }
 
 # ----------------------------------------------------------------------------
@@ -743,11 +739,8 @@ update_mixture_fits_fixed_G <- function(
 update_mixture_fits_refinement <- function(
     F_hat,
     mixture_fits,
-    G_selection = c("fixed", "bic"),
-    G_max = 5L,
     n_starts = 3L,
     max_iter = 20L,
-    mixture_penalty_multiplier = 1,
     min_var = 1e-3,
     mixture_update = c("map", "mle"),
     mu_prior_mean = 0,
@@ -757,423 +750,20 @@ update_mixture_fits_refinement <- function(
     weight_prior_alpha = 1,
     parallel = FALSE,
     workers = NULL) {
-  G_selection <- match.arg(G_selection)
-  mixture_update <- match.arg(mixture_update)
-
-  if (G_selection == "fixed") {
-    # Useful for controlled comparisons where pretraining's G_h should not
-    # change during refinement.
-    return(update_mixture_fits_fixed_G(
-      F_hat = F_hat,
-      mixture_fits = mixture_fits,
-      n_starts = n_starts,
-      max_iter = max_iter,
-      min_var = min_var,
-      mixture_update = mixture_update,
-      mu_prior_mean = mu_prior_mean,
-      mu_prior_kappa = mu_prior_kappa,
-      var_prior_shape = var_prior_shape,
-      var_prior_scale = var_prior_scale,
-      weight_prior_alpha = weight_prior_alpha,
-      parallel = parallel,
-      workers = workers
-    ))
-  }
-
-  parallel_lapply(seq_len(ncol(F_hat)), function(h) {
-    # Let the refined factor scores correct earlier mis-clustering by
-    # reselecting G_h with BIC at the current orientation.
-    select_gmm_bic(
-      F_hat[, h],
-      G_max = G_max,
-      n_starts = n_starts,
-      max_iter = max_iter,
-      mixture_penalty_multiplier = mixture_penalty_multiplier,
-      mixture_update = mixture_update,
-      mu_prior_mean = mu_prior_mean,
-      mu_prior_kappa = mu_prior_kappa,
-      var_prior_shape = var_prior_shape,
-      var_prior_scale = var_prior_scale,
-      weight_prior_alpha = weight_prior_alpha,
-      previous_fit = mixture_fits[[h]]
-    )
-  }, parallel = parallel, workers = workers)
-}
-
-merge_two_refinement_components <- function(fit, a, b) {
-  # Moment-match two univariate Gaussian mixture components into one component.
-  # The merged fit is used as an EM initialization, not as the final estimate.
-  keep <- setdiff(seq_along(fit$pi), c(a, b))
-  weight <- fit$pi[a] + fit$pi[b]
-  mean_ab <- (fit$pi[a] * fit$mu[a] + fit$pi[b] * fit$mu[b]) / weight
-  second_ab <- (
-    fit$pi[a] * (fit$var[a] + fit$mu[a]^2) +
-      fit$pi[b] * (fit$var[b] + fit$mu[b]^2)
-  ) / weight
-  var_ab <- max(second_ab - mean_ab^2, 1e-3)
-
-  pi_new <- c(fit$pi[keep], weight)
-  mu_new <- c(fit$mu[keep], mean_ab)
-  var_new <- c(fit$var[keep], var_ab)
-  ord <- order(mu_new)
-
-  list(
-    pi = pi_new[ord] / sum(pi_new),
-    mu = mu_new[ord],
-    var = var_new[ord],
-    loglik = NA_real_
-  )
-}
-
-nearest_refinement_component_pair <- function(fit, g) {
-  # Attach a tiny component to the nearest component by center location.
-  others <- setdiff(seq_along(fit$pi), g)
-  nearest <- others[which.min(abs(fit$mu[others] - fit$mu[g]))]
-  sort(c(g, nearest))
-}
-
-closest_refinement_adjacent_pair <- function(fit) {
-  # Separation is measured in pooled within-component standard-deviation units.
-  ord <- order(fit$mu)
-  fit <- list(pi = fit$pi[ord], mu = fit$mu[ord], var = fit$var[ord])
-  pooled_var <- pmax((fit$var[-length(fit$var)] + fit$var[-1L]) / 2, 1e-8)
-  sep <- diff(fit$mu) / sqrt(pooled_var)
-  which_min <- which.min(sep)
-
-  list(pair = c(which_min, which_min + 1L), separation = sep[which_min])
-}
-
-prune_refinement_gmm_1d <- function(
-    fit,
-    min_weight = 0,
-    min_separation = 0,
-    max_iter = 20L) {
-  # Merge components that are either too small or too close to be credible
-  # separate latent profiles.  Setting both thresholds to zero disables pruning.
-  fit <- list(pi = fit$pi, mu = fit$mu, var = fit$var, loglik = fit$loglik)
-  ord <- order(fit$mu)
-  fit$pi <- fit$pi[ord] / sum(fit$pi)
-  fit$mu <- fit$mu[ord]
-  fit$var <- fit$var[ord]
-
-  for (iter in seq_len(max_iter)) {
-    if (length(fit$pi) <= 1L) break
-
-    small <- which(fit$pi < min_weight)
-    if (length(small) > 0L) {
-      pair <- nearest_refinement_component_pair(fit, small[which.min(fit$pi[small])])
-      fit <- merge_two_refinement_components(fit, pair[1], pair[2])
-      next
-    }
-
-    closest <- closest_refinement_adjacent_pair(fit)
-    if (is.finite(closest$separation) && closest$separation < min_separation) {
-      fit <- merge_two_refinement_components(fit, closest$pair[1], closest$pair[2])
-      next
-    }
-
-    break
-  }
-
-  fit
-}
-
-prune_mixture_fits_refinement <- function(
-    F_hat,
-    mixture_fits,
-    min_weight = 0,
-    min_separation = 0,
-    max_iter = 20L,
-    n_starts = 3L,
-    mixture_max_iter = 20L,
-    min_var = 1e-3,
-    mixture_update = c("map", "mle"),
-    mu_prior_mean = 0,
-    mu_prior_kappa = 0.01,
-    var_prior_shape = 2,
-    var_prior_scale = 0.3,
-    weight_prior_alpha = 1,
-    parallel = FALSE,
-    workers = NULL) {
-  mixture_update <- match.arg(mixture_update)
-  # Apply the pruning rule factor by factor.  If any component count changes,
-  # refit the pruned mixture with fixed G so the retained parameters are EM
-  # estimates at the current factor scores rather than raw moment matches.
-  G_before <- vapply(mixture_fits, function(z) length(z$pi), integer(1))
-  pruned <- parallel_lapply(mixture_fits, prune_refinement_gmm_1d,
-                            min_weight = min_weight,
-                            min_separation = min_separation,
-                            max_iter = max_iter,
-                            parallel = parallel,
-                            workers = workers)
-  G_after_moment <- vapply(pruned, function(z) length(z$pi), integer(1))
-  changed <- G_after_moment != G_before
-
-  if (any(changed)) {
-    pruned[changed] <- parallel_lapply(which(changed), function(h) {
-      fit_gmm_1d(
-        F_hat[, h],
-        G = length(pruned[[h]]$pi),
-        n_starts = n_starts,
-        max_iter = mixture_max_iter,
-        min_var = min_var,
-        mixture_update = mixture_update,
-        mu_prior_mean = mu_prior_mean,
-        mu_prior_kappa = mu_prior_kappa,
-        var_prior_shape = var_prior_shape,
-        var_prior_scale = var_prior_scale,
-        weight_prior_alpha = weight_prior_alpha,
-        init = pruned[[h]]
-      )
-    }, parallel = parallel, workers = workers)
-  }
-
-  list(
-    mixture_fits = pruned,
-    G_before = G_before,
-    G_after = vapply(pruned, function(z) length(z$pi), integer(1)),
-    n_pruned = sum(G_before) - sum(G_after_moment)
-  )
-}
-
-profile_select_one_factor_G <- function(
-    h,
-    X,
-    F_hat,
-    Lambda,
-    mixture_fits,
-    G_max = 5L,
-    n_starts = 3L,
-    mixture_max_iter = 20L,
-    mixture_penalty_multiplier = 1,
-    profile_mixture_penalty_multiplier = mixture_penalty_multiplier,
-    lambda_l1_penalty = 0,
-    lasso_maxit = 200L,
-    lasso_tol = 1e-6,
-    maxit_per_subject = 20L,
-    factor_update = c("marginal", "conditional_soft", "conditional_hard"),
-    mixture_prior_weight = 1,
-    min_mixture_var = 1e-3,
-    mixture_update = c("map", "mle"),
-    mu_prior_mean = 0,
-    mu_prior_kappa = 0.01,
-    var_prior_shape = 2,
-    var_prior_scale = 0.3,
-    weight_prior_alpha = 1,
-    normalize_factor_scale = TRUE,
-    normalize_factor_location = TRUE,
-    factor_scale_target = 1,
-    factor_scale_method = c("sd", "rms"),
-    parallel_inner = FALSE,
-    workers = NULL) {
-  # Profile candidate G_h values through a short local update of the full data
-  # model.  This is deliberately local: it starts from the current refinement
-  # state and asks which candidate G_h gives the best nearby joint objective.
-  factor_update <- match.arg(factor_update)
-  mixture_update <- match.arg(mixture_update)
-  factor_scale_method <- match.arg(factor_scale_method)
-  n <- nrow(F_hat)
-  candidates <- seq_len(G_max)
-  best <- NULL
-
-  for (g in candidates) {
-    init_h <- if (length(mixture_fits[[h]]$pi) == g) mixture_fits[[h]] else NULL
-    candidate_mixtures <- mixture_fits
-    candidate_mixtures[[h]] <- fit_gmm_1d(
-      F_hat[, h],
-      G = g,
-      n_starts = n_starts,
-      max_iter = mixture_max_iter,
-      min_var = min_mixture_var,
-      mixture_update = mixture_update,
-      mu_prior_mean = mu_prior_mean,
-      mu_prior_kappa = mu_prior_kappa,
-      var_prior_shape = var_prior_shape,
-      var_prior_scale = var_prior_scale,
-      weight_prior_alpha = weight_prior_alpha,
-      init = init_h
-    )
-
-    candidate_F <- update_factor_scores_joint_map(
-      X = X,
-      F_hat = F_hat,
-      Lambda = Lambda,
-      alpha = alpha,
-      mixture_fits = candidate_mixtures,
-      factor_update = factor_update,
-      mixture_prior_weight = mixture_prior_weight,
-      maxit_per_subject = maxit_per_subject,
-      parallel = parallel_inner,
-      workers = workers,
-      verbose = FALSE
-    )
-
-    if (isTRUE(normalize_factor_scale)) {
-      scaled <- normalize_refinement_factor_scale(
-        F_hat = candidate_F,
-        Lambda = Lambda,
-        mixture_fits = candidate_mixtures,
-        target_scale = factor_scale_target,
-        scale_method = factor_scale_method
-      )
-      candidate_F <- scaled$F_hat
-      candidate_Lambda_init <- scaled$Lambda
-      candidate_mixtures <- scaled$mixture_fits
-    } else {
-      candidate_Lambda_init <- Lambda
-    }
-
-    candidate_loading <- update_binary_probit_loadings_glm(
-      X = X,
-      F_hat = candidate_F,
-      alpha_init = alpha,
-      Lambda_init = candidate_Lambda_init,
-      lambda_l1_penalty = lambda_l1_penalty,
-      estimate_intercept = estimate_intercept,
-      lasso_maxit = lasso_maxit,
-      lasso_tol = lasso_tol,
-      parallel = parallel_inner,
-      workers = workers
-    )
-    candidate_alpha <- if (isTRUE(estimate_intercept)) candidate_loading$alpha else rep(0, ncol(X))
-    candidate_Lambda <- if (isTRUE(estimate_intercept)) candidate_loading$Lambda else candidate_loading
-
-    # Refit mixtures at the profiled factor scores while keeping all candidate
-    # component counts fixed.  This lets the prior term respond to the data-fit
-    # update without doing a full restart of the global algorithm.
-    candidate_mixtures <- update_mixture_fits_fixed_G(
-      F_hat = candidate_F,
-      mixture_fits = candidate_mixtures,
-      n_starts = n_starts,
-      max_iter = mixture_max_iter,
-      min_var = min_mixture_var,
-      mixture_update = mixture_update,
-      mu_prior_mean = mu_prior_mean,
-      mu_prior_kappa = mu_prior_kappa,
-      var_prior_shape = var_prior_shape,
-      var_prior_scale = var_prior_scale,
-      weight_prior_alpha = weight_prior_alpha,
-      parallel = parallel_inner,
-      workers = workers
-    )
-
-    df_h <- 3 * g - 1
-    penalty_h <- profile_mixture_penalty_multiplier * 0.5 * df_h * log(n)
-    joint <- joint_binary_probit_objective(
-      X = X,
-      F_hat = candidate_F,
-      Lambda = candidate_Lambda,
-      alpha = candidate_alpha,
-      mixture_fits = candidate_mixtures,
-      mixture_prior_weight = mixture_prior_weight
-    )
-    score <- joint - penalty_h
-
-    if (is.null(best) || score > best$profile_score) {
-      best <- list(
-        G = g,
-        profile_score = score,
-        joint_objective = joint,
-        penalty = penalty_h,
-        F_hat = candidate_F,
-        alpha = candidate_alpha,
-        Lambda = candidate_Lambda,
-        mixture_fits = candidate_mixtures
-      )
-    }
-  }
-
-  best
-}
-
-profile_select_mixture_fits_refinement <- function(
-    X,
-    F_hat,
-    Lambda,
-    mixture_fits,
-    G_max = 5L,
-    n_starts = 3L,
-    mixture_max_iter = 20L,
-    mixture_penalty_multiplier = 1,
-    profile_mixture_penalty_multiplier = mixture_penalty_multiplier,
-    lambda_l1_penalty = 0,
-    lasso_maxit = 200L,
-    lasso_tol = 1e-6,
-    maxit_per_subject = 20L,
-    factor_update = c("marginal", "conditional_soft", "conditional_hard"),
-    mixture_prior_weight = 1,
-    min_mixture_var = 1e-3,
-    mixture_update = c("map", "mle"),
-    mu_prior_mean = 0,
-    mu_prior_kappa = 0.01,
-    var_prior_shape = 2,
-    var_prior_scale = 0.3,
-    weight_prior_alpha = 1,
-    normalize_factor_scale = TRUE,
-    factor_scale_target = 1,
-    factor_scale_method = c("sd", "rms"),
-    parallel = FALSE,
-    workers = NULL) {
-  factor_update <- match.arg(factor_update)
-  mixture_update <- match.arg(mixture_update)
-  factor_scale_method <- match.arg(factor_scale_method)
-  profile_history <- vector("list", ncol(F_hat))
-
-  for (h in seq_len(ncol(F_hat))) {
-    selected <- profile_select_one_factor_G(
-      h = h,
-      X = X,
-      F_hat = F_hat,
-      Lambda = Lambda,
-      alpha = alpha,
-      mixture_fits = mixture_fits,
-      G_max = G_max,
-      n_starts = n_starts,
-      mixture_max_iter = mixture_max_iter,
-      mixture_penalty_multiplier = mixture_penalty_multiplier,
-      profile_mixture_penalty_multiplier = profile_mixture_penalty_multiplier,
-      lambda_l1_penalty = lambda_l1_penalty,
-      estimate_intercept = estimate_intercept,
-      lasso_maxit = lasso_maxit,
-      lasso_tol = lasso_tol,
-      maxit_per_subject = maxit_per_subject,
-      factor_update = factor_update,
-      mixture_prior_weight = mixture_prior_weight,
-      min_mixture_var = min_mixture_var,
-      mixture_update = mixture_update,
-      mu_prior_mean = mu_prior_mean,
-      mu_prior_kappa = mu_prior_kappa,
-      var_prior_shape = var_prior_shape,
-      var_prior_scale = var_prior_scale,
-      weight_prior_alpha = weight_prior_alpha,
-      normalize_factor_scale = normalize_factor_scale,
-      factor_scale_target = factor_scale_target,
-      factor_scale_method = factor_scale_method,
-      parallel_inner = parallel,
-      workers = workers
-    )
-
-    # Commit the locally profiled state before moving to the next factor, giving
-    # later factors the benefit of earlier component-count decisions.
-    F_hat <- selected$F_hat
-    alpha <- selected$alpha
-    Lambda <- selected$Lambda
-    mixture_fits <- selected$mixture_fits
-    profile_history[[h]] <- data.frame(
-      factor = h,
-      selected_G = selected$G,
-      profile_score = selected$profile_score,
-      joint_objective = selected$joint_objective,
-      penalty = selected$penalty
-    )
-  }
-
-  list(
+  update_mixture_fits_fixed_G(
     F_hat = F_hat,
-    alpha = alpha,
-    Lambda = Lambda,
     mixture_fits = mixture_fits,
-    profile_history = do.call(rbind, profile_history)
+    n_starts = n_starts,
+    max_iter = max_iter,
+    min_var = min_var,
+    mixture_update = mixture_update,
+    mu_prior_mean = mu_prior_mean,
+    mu_prior_kappa = mu_prior_kappa,
+    var_prior_shape = var_prior_shape,
+    var_prior_scale = var_prior_scale,
+    weight_prior_alpha = weight_prior_alpha,
+    parallel = parallel,
+    workers = workers
   )
 }
 
@@ -1188,18 +778,6 @@ fit_binary_probit_refinement <- function(
     maxit_per_subject = 50L,
     n_mix_starts = 3L,
     mixture_max_iter = 20L,
-    G_selection = c("fixed", "bic", "profile_bic"),
-    G_max = NULL,
-    mixture_penalty_multiplier = 1,
-    profile_mixture_penalty_multiplier = NULL,
-    profile_G_maxit_per_subject = 10L,
-    profile_G_every = 1L,
-    prune_mixtures = FALSE,
-    pruning_min_weight = 0,
-    pruning_min_separation = 0,
-    pruning_max_iter = 20L,
-    pruning_start_iter = 1L,
-    pruning_every = 1L,
     factor_update = c("marginal", "conditional_soft", "conditional_hard"),
     min_mixture_var = 1e-3,
     mixture_update = c("map", "mle"),
@@ -1233,21 +811,14 @@ fit_binary_probit_refinement <- function(
     workers = NULL,
     verbose = TRUE,
     ...) {
-  G_selection <- match.arg(G_selection)
   factor_update <- match.arg(factor_update)
   mixture_update <- match.arg(mixture_update)
   factor_scale_method <- match.arg(factor_scale_method)
   stopping_objective <- match.arg(stopping_objective)
   refinement_selection_objective <- match.arg(refinement_selection_objective)
-  if (is.null(profile_mixture_penalty_multiplier)) {
-    profile_mixture_penalty_multiplier <- mixture_penalty_multiplier
-  }
   X <- as.matrix(X)
   workers <- resolve_workers(workers)
   min_refine_iter <- as.integer(min_refine_iter)
-  prune_mixtures <- isTRUE(prune_mixtures)
-  pruning_start_iter <- as.integer(pruning_start_iter)
-  pruning_every <- as.integer(pruning_every)
   mixture_prior_weight <- as.numeric(mixture_prior_weight)
   estimate_intercept <- isTRUE(estimate_intercept)
   if (!is.finite(mixture_prior_weight) || mixture_prior_weight < 0) {
@@ -1282,12 +853,6 @@ fit_binary_probit_refinement <- function(
     )
   }
   lambda_penalty_history <- list()
-
-  if (is.null(G_max)) {
-    # If no search limit is supplied, use the largest pretrained component
-    # count.  Passing a larger G_max allows new splits during BIC refinement.
-    G_max <- max(vapply(mixture_fits, function(z) length(z$pi), integer(1)))
-  }
 
   if (isTRUE(preestimate_loadings)) {
     # This is the requested ordering: finish pretraining, then estimate Lambda
@@ -1395,7 +960,6 @@ fit_binary_probit_refinement <- function(
 
   converged <- FALSE
   n_completed <- 0L
-  profile_G_history <- list()
   refinement_trace <- NULL
   keep_refinement_trace <- isTRUE(store_refinement_trace) || isTRUE(return_best_refinement_iteration)
   if (isTRUE(keep_refinement_trace)) {
@@ -1505,99 +1069,29 @@ fit_binary_probit_refinement <- function(
     }
     lambda_update_seconds <- as.numeric(difftime(Sys.time(), lambda_update_start, units = "secs"))
 
-    # Step 3: update marginal mixture profiles.  The usual BIC mode selects G_h
-    # from the marginal factor distribution only.  The profiled mode lets the
-    # full binary-probit data model respond locally before scoring candidates.
+    # Step 3: update marginal mixture profiles, keeping the pretrained component
+    # count fixed for each factor.
     mixture_update_start <- Sys.time()
-    if (G_selection == "profile_bic" && iter %% as.integer(profile_G_every) == 0L) {
-      profiled <- profile_select_mixture_fits_refinement(
-        X = X,
-        F_hat = F_hat,
-        Lambda = Lambda,
-        alpha = alpha,
-        mixture_fits = mixture_fits,
-        G_max = G_max,
-        n_starts = n_mix_starts,
-        mixture_max_iter = mixture_max_iter,
-        mixture_penalty_multiplier = mixture_penalty_multiplier,
-        profile_mixture_penalty_multiplier = profile_mixture_penalty_multiplier,
-        lambda_l1_penalty = lambda_penalty_info$penalty,
-        lasso_maxit = lasso_maxit,
-        lasso_tol = lasso_tol,
-        maxit_per_subject = profile_G_maxit_per_subject,
-        factor_update = factor_update,
-        mixture_prior_weight = mixture_prior_weight,
-        min_mixture_var = min_mixture_var,
-        mixture_update = mixture_update,
-        mu_prior_mean = mu_prior_mean,
-        mu_prior_kappa = mu_prior_kappa,
-        var_prior_shape = var_prior_shape,
-        var_prior_scale = var_prior_scale,
-        weight_prior_alpha = weight_prior_alpha,
-        normalize_factor_scale = normalize_factor_scale,
-        factor_scale_target = factor_scale_target,
-        factor_scale_method = factor_scale_method,
-        parallel = parallel,
-        workers = workers
-      )
-      F_hat <- profiled$F_hat
-      alpha <- profiled$alpha
-      Lambda <- profiled$Lambda
-      mixture_fits <- profiled$mixture_fits
-      profiled$profile_history$iteration <- iter
-      profile_G_history[[length(profile_G_history) + 1L]] <- profiled$profile_history
-    } else {
-      mixture_fits <- update_mixture_fits_refinement(
-        F_hat = F_hat,
-        mixture_fits = mixture_fits,
-        G_selection = if (G_selection == "profile_bic") "fixed" else G_selection,
-        G_max = G_max,
-        n_starts = n_mix_starts,
-        max_iter = mixture_max_iter,
-        mixture_penalty_multiplier = mixture_penalty_multiplier,
-        min_var = min_mixture_var,
-        mixture_update = mixture_update,
-        mu_prior_mean = mu_prior_mean,
-        mu_prior_kappa = mu_prior_kappa,
-        var_prior_shape = var_prior_shape,
-        var_prior_scale = var_prior_scale,
-        weight_prior_alpha = weight_prior_alpha,
-        parallel = parallel,
-        workers = workers
-      )
-    }
+    mixture_fits <- update_mixture_fits_refinement(
+      F_hat = F_hat,
+      mixture_fits = mixture_fits,
+      n_starts = n_mix_starts,
+      max_iter = mixture_max_iter,
+      min_var = min_mixture_var,
+      mixture_update = mixture_update,
+      mu_prior_mean = mu_prior_mean,
+      mu_prior_kappa = mu_prior_kappa,
+      var_prior_shape = var_prior_shape,
+      var_prior_scale = var_prior_scale,
+      weight_prior_alpha = weight_prior_alpha,
+      parallel = parallel,
+      workers = workers
+    )
     mixture_update_seconds <- as.numeric(difftime(Sys.time(), mixture_update_start, units = "secs"))
 
     G_before_prune <- vapply(mixture_fits, function(z) length(z$pi), integer(1))
     n_pruned_components <- 0L
     pruning_seconds <- 0
-    if (prune_mixtures &&
-        iter >= pruning_start_iter &&
-        pruning_every > 0L &&
-        iter %% pruning_every == 0L) {
-      pruning_start <- Sys.time()
-      pruned <- prune_mixture_fits_refinement(
-        F_hat = F_hat,
-        mixture_fits = mixture_fits,
-        min_weight = pruning_min_weight,
-        min_separation = pruning_min_separation,
-        max_iter = pruning_max_iter,
-        n_starts = n_mix_starts,
-        mixture_max_iter = mixture_max_iter,
-        min_var = min_mixture_var,
-        mixture_update = mixture_update,
-        mu_prior_mean = mu_prior_mean,
-        mu_prior_kappa = mu_prior_kappa,
-        var_prior_shape = var_prior_shape,
-        var_prior_scale = var_prior_scale,
-        weight_prior_alpha = weight_prior_alpha,
-        parallel = parallel,
-        workers = workers
-      )
-      mixture_fits <- pruned$mixture_fits
-      n_pruned_components <- pruned$n_pruned
-      pruning_seconds <- as.numeric(difftime(Sys.time(), pruning_start, units = "secs"))
-    }
 
     # Track both pieces of the objective so we can see whether improvements
     # come from binary prediction, better mixture fit, or both.
@@ -1776,18 +1270,7 @@ fit_binary_probit_refinement <- function(
     selected_refinement_iteration = selected_refinement_iteration,
     maxit_per_subject = maxit_per_subject,
     mixture_max_iter = mixture_max_iter,
-    G_selection = G_selection,
-    G_max = G_max,
-    mixture_penalty_multiplier = mixture_penalty_multiplier,
-    profile_mixture_penalty_multiplier = profile_mixture_penalty_multiplier,
-    profile_G_maxit_per_subject = profile_G_maxit_per_subject,
-    profile_G_every = profile_G_every,
-    prune_mixtures = prune_mixtures,
-    pruning_min_weight = pruning_min_weight,
-    pruning_min_separation = pruning_min_separation,
-    pruning_max_iter = pruning_max_iter,
-    pruning_start_iter = pruning_start_iter,
-    pruning_every = pruning_every,
+    G_selection = "fixed",
     factor_update = factor_update,
     min_mixture_var = min_mixture_var,
     mixture_update = mixture_update,
@@ -1800,7 +1283,6 @@ fit_binary_probit_refinement <- function(
     ),
     mixture_prior_weight = mixture_prior_weight,
     estimate_intercept = estimate_intercept,
-    profile_G_history = if (length(profile_G_history)) do.call(rbind, profile_G_history) else NULL,
     lambda_l1_penalty = lambda_l1_penalty,
     lambda_column_spike_slab = list(
       enabled = lambda_column_spike_slab,
@@ -1842,22 +1324,10 @@ fit_binary_probit_pretrain_then_refine <- function(
     X,
     H = NULL,
     H_max = min(10L, nrow(as.matrix(X)) - 1L, ncol(as.matrix(X))),
-    G_max = 5L,
-    pretrain_G_selection = c("bic", "fixed"),
     G_fixed = NULL,
     n_aug_iter = 4L,
     z_update = c("sample", "expectation"),
     n_refine_iter = 5L,
-    refine_G_selection = c("fixed", "bic"),
-    refine_G_max = G_max,
-    mixture_penalty_multiplier = 1,
-    profile_mixture_penalty_multiplier = NULL,
-    prune_mixtures = FALSE,
-    pruning_min_weight = 0,
-    pruning_min_separation = 0,
-    pruning_max_iter = 20L,
-    pruning_start_iter = 1L,
-    pruning_every = 1L,
     factor_update = c("marginal", "conditional_soft", "conditional_hard"),
     min_mixture_var = 1e-3,
     mixture_prior_weight = 1,
@@ -1882,8 +1352,6 @@ fit_binary_probit_pretrain_then_refine <- function(
     verbose = TRUE,
     ...) {
   z_update <- match.arg(z_update)
-  pretrain_G_selection <- match.arg(pretrain_G_selection)
-  refine_G_selection <- match.arg(refine_G_selection)
   factor_update <- match.arg(factor_update)
   factor_scale_method <- match.arg(factor_scale_method)
   stopping_objective <- match.arg(stopping_objective)
@@ -1893,12 +1361,9 @@ fit_binary_probit_pretrain_then_refine <- function(
     X = X,
     H = H,
     H_max = H_max,
-    pretrain_G_selection = pretrain_G_selection,
-    G_max = G_max,
     G_fixed = G_fixed,
     n_aug_iter = n_aug_iter,
     z_update = z_update,
-    mixture_penalty_multiplier = mixture_penalty_multiplier,
     parallel = parallel,
     workers = workers,
     seed = seed,
@@ -1910,16 +1375,6 @@ fit_binary_probit_pretrain_then_refine <- function(
     X = X,
     pretrain_fit = pretrain_fit,
     n_refine_iter = n_refine_iter,
-    G_selection = refine_G_selection,
-    G_max = refine_G_max,
-    mixture_penalty_multiplier = mixture_penalty_multiplier,
-    profile_mixture_penalty_multiplier = profile_mixture_penalty_multiplier,
-    prune_mixtures = prune_mixtures,
-    pruning_min_weight = pruning_min_weight,
-    pruning_min_separation = pruning_min_separation,
-    pruning_max_iter = pruning_max_iter,
-    pruning_start_iter = pruning_start_iter,
-    pruning_every = pruning_every,
     factor_update = factor_update,
     min_mixture_var = min_mixture_var,
     mixture_prior_weight = mixture_prior_weight,
@@ -1960,11 +1415,6 @@ summarize_binary_probit_refinement <- function(fit) {
     converged = fit$joint_refinement$converged,
     n_completed = fit$joint_refinement$n_completed,
     objective_tolerance = fit$joint_refinement$objective_tolerance,
-    prune_mixtures = fit$joint_refinement$prune_mixtures,
-    pruning_min_weight = fit$joint_refinement$pruning_min_weight,
-    pruning_min_separation = fit$joint_refinement$pruning_min_separation,
-    pruning_start_iter = fit$joint_refinement$pruning_start_iter,
-    pruning_every = fit$joint_refinement$pruning_every,
     normalize_factor_scale = fit$joint_refinement$normalize_factor_scale,
     factor_scale_target = fit$joint_refinement$factor_scale_target,
     factor_scale_method = fit$joint_refinement$factor_scale_method,

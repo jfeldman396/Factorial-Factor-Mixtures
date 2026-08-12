@@ -39,8 +39,9 @@ script_dir <- local({
   if (length(files) > 0L) dirname(normalizePath(tail(files, 1L))) else getwd()
 })
 
-source(file.path(script_dir, "binary_probit_pretraining_algorithm_commented.R"))
-source(file.path(script_dir, "binary_probit_refinement_algorithm_commented.R"))
+repo_root <- normalizePath(file.path(script_dir, "../.."))
+source(file.path(repo_root, "R", "binary_probit_pretraining.R"))
+source(file.path(repo_root, "R", "binary_probit_refinement.R"))
 
 # ----------------------------------------------------------------------------
 # Small utilities
@@ -432,6 +433,7 @@ fit_binary_probit_pretraining_intercept <- function(
     n_random_starts = 1L,
     max_outer = 4L,
     n_mix_starts = 3L,
+    mixture_max_iter = 20L,
     mixture_update = c("map", "mle"),
     mu_prior_mean = 0,
     mu_prior_kappa = 0.05,
@@ -489,12 +491,11 @@ fit_binary_probit_pretraining_intercept <- function(
 
     rotation_out <- estimate_mixture_ica_unknown_G(
       S = S,
-      G_selection = "fixed",
       G_fixed = G_iter,
       n_random_starts = n_random_starts,
       max_outer = max_outer,
       n_mix_starts = n_mix_starts,
-      mixture_penalty_multiplier = 1,
+      mixture_max_iter = mixture_max_iter,
       mixture_update = mixture_update,
       mu_prior_mean = mu_prior_mean,
       mu_prior_kappa = mu_prior_kappa,
@@ -801,6 +802,7 @@ fit_binary_probit_refinement_intercept <- function(
     n_refine_iter = 8L,
     maxit_per_subject = 60L,
     n_mix_starts = 3L,
+    mixture_max_iter = 20L,
     min_mixture_var = 0.05,
     mixture_update = c("map", "mle"),
     mu_prior_mean = 0,
@@ -915,8 +917,8 @@ fit_binary_probit_refinement_intercept <- function(
     mixture_fits <- update_mixture_fits_refinement(
       F_hat = F_hat,
       mixture_fits = mixture_fits,
-      G_selection = "fixed",
       n_starts = n_mix_starts,
+      max_iter = mixture_max_iter,
       min_var = min_mixture_var,
       mixture_update = mixture_update,
       mu_prior_mean = mu_prior_mean,
@@ -972,7 +974,9 @@ fit_binary_probit_refinement_intercept <- function(
       )
     }
 
-    if (iter >= min_refine_iter &&
+    if (!is.null(objective_tolerance) &&
+        is.finite(objective_tolerance) &&
+        iter >= min_refine_iter &&
         is.finite(stopping_change) &&
         stopping_change <= objective_tolerance) {
       converged <- TRUE

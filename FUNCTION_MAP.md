@@ -7,8 +7,6 @@ This file is a starting point for code review. It records the current conceptual
 Source files:
 
 - `R/binary_probit_pretraining.R`
-- `scripts/sample_size/binary_probit_pretraining_algorithm_commented.R`
-- `scripts/ifeval/binary_probit_pretraining_algorithm_commented.R`
 
 Main responsibilities:
 
@@ -25,8 +23,6 @@ Main responsibilities:
 Source files:
 
 - `R/binary_probit_refinement.R`
-- `scripts/sample_size/binary_probit_refinement_algorithm_commented.R`
-- `scripts/ifeval/binary_probit_refinement_algorithm_commented.R`
 
 Main responsibilities:
 

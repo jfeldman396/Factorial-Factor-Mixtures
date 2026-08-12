@@ -7,7 +7,7 @@ The current contents are organized around two analysis tracks:
 1. `experiments/sample_size_intercepts_centered`: simulations comparing the proposed binary probit independent-mixture factor method against a correctly specified joint-mixture factor analyzer with probit augmentation and full Gibbs sampling.
 2. `experiments/ifeval`: IFEval rank selection, predictive comparison against ordinary binary probit factor models, tuned sparse loading estimation, and factor interpretation/visualization.
 
-The main implementation lives in `R/`. Runnable scripts are kept under `scripts/`, with experiment-specific copies preserved so the current results can be reproduced before a deeper refactor.
+The main implementation lives in `R/`. Runnable scripts are kept under `scripts/` and source the shared implementation so the simulation and IFEval analyses use the same fitting code.
 
 See `REPLICATION.md` for step-by-step instructions to rerun the IFEval analysis and the sample-size simulation.
 
@@ -44,11 +44,8 @@ The cleaned IFEval data used by the scripts live in `data/ifeval`.
 
 ## Remote GitHub Repository
 
-This is currently a local git repository scaffold. To publish it, create an empty GitHub repository, then run:
+The configured remote is:
 
 ```sh
-git remote add origin git@github.com:USER/factorial-factor-mixtures.git
-git push -u origin main
+https://github.com/jfeldman396/Factorial-Factor-Mixtures.git
 ```
-
-If using HTTPS instead of SSH, replace the remote URL with the HTTPS URL GitHub provides.
