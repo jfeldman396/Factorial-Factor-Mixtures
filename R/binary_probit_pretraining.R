@@ -32,7 +32,7 @@
 #          selected by grid search followed by local one-dimensional
 #          optimization.
 #       5. Estimate alpha and working loadings Lambda from Z ~ alpha + F Lambda'.
-#       6. Fix Psi = I, then sample or average Z | X, F, alpha, Lambda, Psi.
+#       6. Fix Psi = I, then sample or average Z | X, F, alpha, Lambda.
 #   end
 #
 # Main exported functions in this file:
@@ -378,6 +378,12 @@ simulate_binary_probit_independent_mixture_factor_model <- function(
     noise_sd = 1,
     rotate_loadings = TRUE,
     seed = 1L) {
+  # Pipeline role: simulation data generator for the sample-size experiments.
+  # It draws independent mixture factors F, constructs one of the supported
+  # loading patterns, generates latent Gaussian responses
+  # Z_ij = lambda_j' f_i + epsilon_ij, and returns X_ij = 1{Z_ij > 0}.
+  # The scripts/sample_size driver adds item intercepts for the current
+  # comparison, because those experiments mimic the IFEval binary probit layer.
   set.seed(seed)
   loading_design <- match.arg(loading_design)
   cross_factor_mode <- match.arg(cross_factor_mode)
@@ -534,6 +540,10 @@ fit_gmm_1d <- function(
     var_prior_scale = 0.3,
     weight_prior_alpha = 1,
     init = NULL) {
+  # Pipeline role: fit one factor coordinate's marginal Gaussian mixture.
+  # Pretraining calls this repeatedly while rotating SVD scores; refinement
+  # calls the same routine after updating MAP factor scores.  The repository
+  # currently uses fixed G_h values supplied by the simulation/IFEval scripts.
   mixture_update <- match.arg(mixture_update)
   x <- as.numeric(x)
   n <- length(x)
@@ -713,6 +723,9 @@ fit_column_mixtures_fixed_G <- function(
     previous_fits = NULL,
     parallel = FALSE,
     workers = NULL) {
+  # Pipeline role: fit the independent marginal mixture prior
+  # p(f_i) = prod_h sum_g pi_hg N(f_ih; mu_hg, sigma_hg^2)
+  # for a fixed number of components in each factor coordinate.
   mixture_update <- match.arg(mixture_update)
   H <- ncol(F)
   G_fixed <- normalize_G_fixed(G_fixed, H)
@@ -742,38 +755,9 @@ fit_column_mixtures_fixed_G <- function(
   }, parallel = parallel, workers = workers)
 }
 
-fit_column_mixtures <- function(
-    F,
-    G_fixed = NULL,
-    n_starts = 8L,
-    max_iter = 20L,
-    mixture_update = c("map", "mle"),
-    mu_prior_mean = 0,
-    mu_prior_kappa = 0.01,
-    var_prior_shape = 2,
-    var_prior_scale = 0.3,
-    weight_prior_alpha = 1,
-    previous_fits = NULL,
-    parallel = FALSE,
-    workers = NULL) {
-  fit_column_mixtures_fixed_G(
-    F = F,
-    G_fixed = G_fixed,
-    n_starts = n_starts,
-    max_iter = max_iter,
-    mixture_update = mixture_update,
-    mu_prior_mean = mu_prior_mean,
-    mu_prior_kappa = mu_prior_kappa,
-    var_prior_shape = var_prior_shape,
-    var_prior_scale = var_prior_scale,
-    weight_prior_alpha = weight_prior_alpha,
-    previous_fits = previous_fits,
-    parallel = parallel,
-    workers = workers
-  )
-}
-
 mixture_loglik_total <- function(F, fits) {
+  # Rotation objective used in pretraining: sum the fitted one-dimensional
+  # marginal mixture log likelihoods across factor coordinates.
   sum(vapply(seq_len(ncol(F)), function(h) {
     sum(log_dmix_1d(F[, h], fits[[h]]))
   }, numeric(1)))
@@ -1067,6 +1051,10 @@ estimate_mixture_ica_unknown_G <- function(
     parallel = FALSE,
     workers = NULL,
     verbose = TRUE) {
+  # Pipeline role: rotate whitened/SVD scores so that each coordinate is well
+  # described by its own one-dimensional Gaussian mixture.  The historical
+  # function name says "unknown_G"; in this reproducible pipeline G_fixed is
+  # always supplied, so no component-count search occurs here.
   mixture_update <- match.arg(mixture_update)
   rotation_sweep <- match.arg(rotation_sweep)
   disjoint_pairing <- match.arg(disjoint_pairing)
@@ -1092,8 +1080,8 @@ estimate_mixture_ica_unknown_G <- function(
     F <- S %*% R
 
     # Initial mixture fits at the starting orientation.
-    fits <- fit_column_mixtures(
-      F,
+    fits <- fit_column_mixtures_fixed_G(
+      F = F,
       G_fixed = G_fixed,
       n_starts = n_mix_starts,
       max_iter = mixture_max_iter,
@@ -1108,8 +1096,8 @@ estimate_mixture_ica_unknown_G <- function(
     )
 
     refit_current <- function(F_current, previous_fits) {
-      fit_column_mixtures(
-        F_current,
+      fit_column_mixtures_fixed_G(
+        F = F_current,
         G_fixed = G_fixed,
         n_starts = n_mix_starts,
         max_iter = mixture_max_iter,
@@ -1283,6 +1271,9 @@ rtruncnorm_binary_vec <- function(mean, sd, lower, upper) {
 }
 
 initialize_binary_intercepts <- function(X, offset = 0.5) {
+  # Pipeline role: item-difficulty starting values.  The empirical pass rate is
+  # transformed to the probit scale with a small continuity correction so all
+  # items, including all-0/all-1 columns in tiny smoke tests, have finite starts.
   X <- as.matrix(X)
   n_j <- colSums(!is.na(X))
   p_hat <- (colSums(X, na.rm = TRUE) + offset) / (n_j + 2 * offset)
@@ -1290,6 +1281,8 @@ initialize_binary_intercepts <- function(X, offset = 0.5) {
 }
 
 initialize_binary_Z <- function(X, seed = NULL, alpha = NULL) {
+  # Pipeline role: initial probit augmentation.  Given X and current intercepts,
+  # draw Z from N(alpha_j, 1) truncated above or below zero.
   if (!is.null(seed)) set.seed(seed)
   X <- as.matrix(X)
   Z <- matrix(NA_real_, nrow(X), ncol(X))
@@ -1319,6 +1312,9 @@ truncnorm_binary_moments_vec <- function(mean, sd, lower, upper) {
 }
 
 sample_binary_Z_given_model <- function(X, F_hat, Lambda, Psi, alpha = NULL, seed = NULL) {
+  # Pipeline role: stochastic augmentation update inside pretraining.
+  # Conditional on current F, Lambda, and alpha, draw latent Gaussian Z values
+  # consistent with each observed binary response.
   if (!is.null(seed)) set.seed(seed)
   X <- as.matrix(X)
   F_hat <- as.matrix(F_hat)
@@ -1344,6 +1340,9 @@ sample_binary_Z_given_model <- function(X, F_hat, Lambda, Psi, alpha = NULL, see
 }
 
 expected_binary_Z_given_model <- function(X, F_hat, Lambda, Psi, alpha = NULL) {
+  # Pipeline role: deterministic augmentation update used by the reproducible
+  # sample-size experiments.  This returns E[Z | X, F, Lambda, alpha], reducing
+  # Monte Carlo noise relative to repeated truncated-normal draws.
   X <- as.matrix(X)
   F_hat <- as.matrix(F_hat)
   Lambda <- as.matrix(Lambda)
@@ -1377,6 +1376,9 @@ update_working_loadings_no_intercept <- function(
     F_hat,
     loading_penalty = 0,
     min_residual_var = 1e-4) {
+  # Pipeline role: legacy/intercept-free loading update for simulations where
+  # the probit index is lambda_j' f_i.  The current IFEval-like simulations use
+  # update_working_loadings_with_intercept() instead.
   Z <- as.matrix(Z)
   F_hat <- as.matrix(F_hat)
   n <- nrow(Z)
@@ -1414,6 +1416,10 @@ update_working_loadings_with_intercept <- function(
     F_hat,
     loading_penalty = 0,
     min_residual_var = 1e-4) {
+  # Pipeline role: Stage 1 loading/intercept update.  This is an ordinary least
+  # squares regression of augmented Z_j on [1, F], followed by optional
+  # soft-thresholding of loadings only.  The intercept is re-estimated after
+  # shrinkage so fitted Z remains centered correctly item by item.
   Z <- as.matrix(Z)
   F_hat <- as.matrix(F_hat)
   p <- ncol(Z)
@@ -1463,100 +1469,13 @@ binary_probit_observed_loglik <- function(X, F_hat, Lambda, alpha = NULL) {
   sum(X * log(p1) + (1 - X) * log(p0))
 }
 
-prune_factors_by_probit_drop <- function(
-    X,
-    F_hat,
-    Lambda,
-    mixture_fits = NULL,
-    class_map = NULL,
-    responsibilities = NULL,
-    loading_threshold = 0.10,
-    min_active_loadings = 4L,
-    min_loading_energy_share = 0,
-    likelihood_penalty_multiplier = 1,
-    min_keep = 1L) {
-  # Factor pruning after a few Z-augmentation updates.  The goal is to avoid
-  # choosing H from the crude initial Z.  We first run an intentionally generous
-  # factor model, then keep factors whose estimated loadings are active and
-  # whose removal causes a meaningful drop in the observed binary probit
-  # likelihood.
-  X <- as.matrix(X)
-  F_hat <- as.matrix(F_hat)
-  Lambda <- as.matrix(Lambda)
-  H <- ncol(F_hat)
-  n <- nrow(X)
-
-  full_ll <- binary_probit_observed_loglik(X, F_hat, Lambda)
-  active_count <- colSums(abs(Lambda) > loading_threshold)
-  loading_energy <- colSums(Lambda^2)
-  loading_energy_share <- loading_energy / pmax(sum(loading_energy), 1e-12)
-  ll_drop <- numeric(H)
-
-  for (h in seq_len(H)) {
-    keep_h <- setdiff(seq_len(H), h)
-    minus_ll <- if (length(keep_h) == 0L) {
-      binary_probit_observed_loglik(
-        X,
-        matrix(0, nrow = nrow(F_hat), ncol = 1L),
-        matrix(0, nrow = ncol(X), ncol = 1L)
-      )
-    } else {
-      binary_probit_observed_loglik(
-        X,
-        F_hat[, keep_h, drop = FALSE],
-        Lambda[, keep_h, drop = FALSE]
-      )
-    }
-    ll_drop[h] <- full_ll - minus_ll
-  }
-
-  # A factor should survive only if it has enough active loadings and improves
-  # the data likelihood by more than a BIC-like active-support penalty.
-  penalty <- likelihood_penalty_multiplier * active_count * log(n)
-  keep <- active_count >= min_active_loadings &
-    loading_energy_share >= min_loading_energy_share &
-    (2 * ll_drop) > penalty
-
-  # If the rule is too aggressive, retain the strongest factors by likelihood
-  # evidence so the algorithm can continue.
-  min_keep <- max(1L, min(as.integer(min_keep), H))
-  if (sum(keep) < min_keep) {
-    rank_score <- 2 * ll_drop - penalty
-    keep[order(rank_score, loading_energy, decreasing = TRUE)[seq_len(min_keep)]] <- TRUE
-  }
-
-  kept <- which(keep)
-  dropped <- which(!keep)
-
-  out <- list(
-    F_hat = F_hat[, kept, drop = FALSE],
-    Lambda = Lambda[, kept, drop = FALSE],
-    mixture_fits = if (!is.null(mixture_fits)) mixture_fits[kept] else NULL,
-    class_map = if (!is.null(class_map)) class_map[, kept, drop = FALSE] else NULL,
-    responsibilities = if (!is.null(responsibilities)) responsibilities[kept] else NULL,
-    kept = kept,
-    dropped = dropped,
-    diagnostics = data.frame(
-      factor = seq_len(H),
-      active_loadings = active_count,
-      loading_energy = loading_energy,
-      loading_energy_share = loading_energy_share,
-      probit_loglik_drop = ll_drop,
-      penalty = penalty,
-      keep = keep
-    )
-  )
-
-  if (!is.null(out$class_map)) {
-    colnames(out$class_map) <- paste0("factor_", seq_len(ncol(out$F_hat)))
-  }
-  colnames(out$Lambda) <- paste0("factor_", seq_len(ncol(out$F_hat)))
-  out
-}
-
 svd_scores_from_Z <- function(Z, H, center_Z = FALSE) {
   Z <- as.matrix(Z)
-  # The left singular vectors estimate the signal column space of latent Z.
+  # Pipeline role: Stage 1 spectral initialization.
+  #
+  # The left singular vectors estimate the subject-score subspace of the
+  # augmented latent matrix.  We scale U by sqrt(n) so each score column has the
+  # same order as a latent factor coordinate.
   Z_work <- if (isTRUE(center_Z)) sweep(Z, 2L, colMeans(Z), "-") else Z
   dec <- svd(Z_work, nu = H, nv = H)
   S <- sqrt(nrow(Z_work)) * dec$u[, seq_len(H), drop = FALSE]
@@ -1577,6 +1496,10 @@ select_num_factors_bai_ng <- function(
     H_min = 1L,
     criterion = c("ICp2", "ICp1", "ICp3")) {
   criterion <- match.arg(criterion)
+  # Pipeline role: optional rank preselection when H is not supplied.  The
+  # current simulation grid passes the true H, while the empirical IFEval
+  # scripts use their own held-out rank-selection path.  This function remains
+  # for the generic wrapper.
   X <- as.matrix(X)
   n <- nrow(X)
   p <- ncol(X)
@@ -1640,13 +1563,6 @@ fit_binary_probit_pretraining <- function(
     H = NULL,
     H_max = min(10L, nrow(as.matrix(X)) - 1L, ncol(as.matrix(X))),
     factor_criterion = "ICp2",
-    H_selection_strategy = c("initial_bai_ng", "overfit_prune"),
-    H_prune_after_iter = 4L,
-    H_prune_loading_threshold = 0.10,
-    H_prune_min_active_loadings = 4L,
-    H_prune_min_loading_energy_share = 0,
-    H_prune_likelihood_penalty_multiplier = 1,
-    H_prune_min_keep = 1L,
     G_fixed = NULL,
     n_aug_iter = 4L,
     z_update = c("sample", "expectation"),
@@ -1690,7 +1606,13 @@ fit_binary_probit_pretraining <- function(
     seed = 20260715L,
     verbose = TRUE,
     ...) {
-  H_selection_strategy <- match.arg(H_selection_strategy)
+  # Pipeline role: Stage 1/2 pretraining for the binary probit independent
+  # mixture factor model.  Each augmentation iteration alternates:
+  #   1. latent Z -> SVD score subspace,
+  #   2. orthogonal rotation toward fixed-G marginal mixture coordinates,
+  #   3. working regression update for alpha and Lambda,
+  #   4. probit augmentation update for the next Z.
+  # It returns a complete initialization consumed directly by refinement.
   z_update <- match.arg(z_update)
   pretrain_objective <- match.arg(pretrain_objective)
   mixture_update <- match.arg(mixture_update)
@@ -1720,9 +1642,9 @@ fit_binary_probit_pretraining <- function(
   }
 
   H_selection <- NULL
-  H_pruning <- NULL
-  H_pruned <- FALSE
   if (is.null(H)) {
+    # Generic rank preselection.  The reproducible sample-size simulations pass
+    # a known H, so this branch is mainly a convenience for exploratory fits.
     Z_for_selection <- if (isTRUE(center_Z_for_svd)) {
       sweep(Z, 2L, colMeans(Z), "-")
     } else {
@@ -1734,30 +1656,10 @@ fit_binary_probit_pretraining <- function(
       H_min = 1L,
       criterion = factor_criterion
     )
-
-    if (H_selection_strategy == "overfit_prune") {
-      # Start deliberately large, then prune after a few Z updates.  This avoids
-      # making an irreversible low-rank choice from the crude initial Z.
-      H <- min(as.integer(H_max), nrow(X) - 1L, ncol(X))
-      H_selection <- H_selection_initial
-      H_selection$H_initial_bai_ng <- H_selection_initial$H_hat
-      H_selection$H_start <- H
-      H_selection$strategy <- H_selection_strategy
-      if (verbose) {
-        message(
-          "Starting with H = ", H,
-          " for overfit-prune pretraining; initial ",
-          factor_criterion,
-          " would choose H = ", H_selection_initial$H_hat,
-          "."
-        )
-      }
-    } else {
-      H_selection <- H_selection_initial
-      H_selection$strategy <- H_selection_strategy
-      H <- H_selection$H_hat
-      if (verbose) message("Selected H = ", H, " by ", factor_criterion, ".")
-    }
+    H_selection <- H_selection_initial
+    H_selection$strategy <- "initial_bai_ng"
+    H <- H_selection$H_hat
+    if (verbose) message("Selected H = ", H, " by ", factor_criterion, ".")
   }
 
   H <- as.integer(H)
@@ -1839,62 +1741,6 @@ fit_binary_probit_pretraining <- function(
     }
     alpha_hat <- if (!is.null(loading_out$alpha)) loading_out$alpha else rep(0, ncol(X))
     loading_seconds <- as.numeric(difftime(Sys.time(), loading_start, units = "secs"))
-
-    H_before_prune <- H
-    pruned_factors <- integer(0)
-    prune_diagnostics <- NULL
-    if (H_selection_strategy == "overfit_prune" &&
-        !isTRUE(H_pruned) &&
-        iter >= as.integer(H_prune_after_iter)) {
-      prune_out <- prune_factors_by_probit_drop(
-        X = X,
-        F_hat = F_hat,
-        Lambda = loading_out$Lambda,
-        mixture_fits = rotation_out$fits,
-        class_map = class_map,
-        responsibilities = responsibilities,
-        loading_threshold = H_prune_loading_threshold,
-        min_active_loadings = H_prune_min_active_loadings,
-        min_loading_energy_share = H_prune_min_loading_energy_share,
-        likelihood_penalty_multiplier = H_prune_likelihood_penalty_multiplier,
-        min_keep = H_prune_min_keep
-      )
-
-      F_hat <- prune_out$F_hat
-      rotation_out$F_hat <- F_hat
-      rotation_out$fits <- prune_out$mixture_fits
-      rotation_out$G_hat <- vapply(rotation_out$fits, function(z) length(z$pi), integer(1))
-      rotation_out$loglik <- mixture_loglik_total(F_hat, rotation_out$fits)
-      loading_out$Lambda <- prune_out$Lambda
-      loading_out$Lambda_ls <- loading_out$Lambda_ls[, prune_out$kept, drop = FALSE]
-      loading_out$fitted <- sweep(F_hat %*% t(loading_out$Lambda), 2L, alpha_hat, "+")
-      loading_out$residual <- Z - loading_out$fitted
-      responsibilities <- prune_out$responsibilities
-      class_map <- prune_out$class_map
-      H <- ncol(F_hat)
-      G_fixed <- normalize_G_fixed(G_fixed[prune_out$kept], H)
-      H_pruned <- TRUE
-      pruned_factors <- prune_out$dropped
-      prune_diagnostics <- prune_out$diagnostics
-      H_pruning <- list(
-        iteration = iter,
-        H_before = H_before_prune,
-        H_after = H,
-        kept = prune_out$kept,
-        dropped = prune_out$dropped,
-        diagnostics = prune_out$diagnostics
-      )
-      if (verbose) {
-        message(
-          "Pruned H from ", H_before_prune,
-          " to ", H,
-          " at augmentation iteration ", iter,
-          "; dropped axes: ",
-          if (length(pruned_factors)) paste(pruned_factors, collapse = ",") else "none",
-          "."
-        )
-      }
-    }
 
     # Step 4: fix the probit residual scale to the identity.  The unconstrained
     # residual variance is saved only as a diagnostic and is never used to
@@ -1978,9 +1824,6 @@ fit_binary_probit_pretraining <- function(
       no_improvement_count = no_improvement_count,
       converged = FALSE,
       mean_psi = mean(diag(Psi_for_update)),
-      H_before_prune = H_before_prune,
-      H_after_prune = H,
-      n_pruned_factors = length(pruned_factors),
       pretrain_G_selection = "fixed",
       mixture_update = mixture_update,
       svd_seconds = svd_seconds,
@@ -2046,11 +1889,7 @@ fit_binary_probit_pretraining <- function(
         rotation_score = rotation_out$loglik,
         penalized_score = rotation_out$loglik,
         pretrain_objective = pretrain_objective_value,
-        relative_objective_change = relative_objective_change,
-        H_before_prune = H_before_prune,
-        H_after_prune = H,
-        pruned_factors = pruned_factors,
-        prune_diagnostics = prune_diagnostics
+        relative_objective_change = relative_objective_change
       )
     }
 
@@ -2129,13 +1968,10 @@ fit_binary_probit_pretraining <- function(
   history_out <- do.call(rbind, history[!vapply(history, is.null, logical(1))])
   selected_pretraining_iteration <- completed_iter
   if (isTRUE(return_best_iteration)) {
-    selectable <- rep(TRUE, nrow(history_out))
-    if (H_selection_strategy == "overfit_prune" && !is.null(H_pruning)) {
-      # Once H has been pruned, do not return a pre-pruning snapshot with the
-      # intentionally over-complete factor dimension.
-      selectable <- history_out$iteration >= H_pruning$iteration
-    }
-    best_row <- which(selectable)[which.max(history_out$pretrain_objective[selectable])]
+    # Return the best-scoring augmentation iterate under the requested
+    # pretraining objective.  This is useful for sampled-Z runs where the final
+    # augmentation draw may be noisier than an earlier draw.
+    best_row <- which.max(history_out$pretrain_objective)
     selected_pretraining_iteration <- history_out$iteration[best_row]
     current <- candidate_snapshots[[selected_pretraining_iteration]]
   }
@@ -2144,8 +1980,7 @@ fit_binary_probit_pretraining <- function(
   current$Z_last_sampled <- Z
   current$H <- H
   current$H_selection <- H_selection
-  current$H_selection_strategy <- H_selection_strategy
-  current$H_pruning <- H_pruning
+  current$H_selection_strategy <- if (is.null(H_selection)) "fixed_supplied_H" else "initial_bai_ng"
   current$history <- history_out
   current$iteration_trace <- iteration_trace[!vapply(iteration_trace, is.null, logical(1))]
   current$pretraining_converged <- converged

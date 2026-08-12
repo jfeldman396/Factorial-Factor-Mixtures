@@ -97,6 +97,9 @@ joint_binary_probit_objective <- function(
 }
 
 coerce_lambda_l1_penalty <- function(lambda_l1_penalty, H) {
+  # Accept either one global loading penalty or one penalty per factor column.
+  # The simulation and IFEval scripts use this for the sparse itemwise probit
+  # loading regressions in refinement.
   penalty <- as.numeric(lambda_l1_penalty)
   if (length(penalty) == 0L || any(!is.finite(penalty))) {
     stop("lambda_l1_penalty must contain finite numeric values.")
@@ -116,47 +119,6 @@ lambda_laplace_log_prior <- function(Lambda, lambda_l1_penalty = 0) {
   Lambda <- as.matrix(Lambda)
   penalty <- coerce_lambda_l1_penalty(lambda_l1_penalty, ncol(Lambda))
   -sum(sweep(abs(Lambda), 2L, penalty, "*"))
-}
-
-lambda_column_spike_slab_penalties <- function(
-    Lambda,
-    spike_penalty = 1,
-    slab_penalty = 0.05,
-    slab_prior = 0.5,
-    effective_p = 1) {
-  # Empirical-Bayes column spike/slab lasso.  Each loading column is assigned a
-  # posterior slab probability under a two-Laplace mixture, then its next
-  # surrogate-regression penalty is E[lambda_h | current Lambda_h].
-  Lambda <- as.matrix(Lambda)
-  if (!is.finite(spike_penalty) || !is.finite(slab_penalty) ||
-      spike_penalty <= 0 || slab_penalty <= 0) {
-    stop("Spike and slab penalties must be positive finite numbers.")
-  }
-  if (spike_penalty < slab_penalty) {
-    stop("spike_penalty should be greater than or equal to slab_penalty.")
-  }
-  if (!is.finite(slab_prior) || slab_prior <= 0 || slab_prior >= 1) {
-    stop("slab_prior must lie strictly between 0 and 1.")
-  }
-  if (!is.finite(effective_p) || effective_p < 0) {
-    stop("effective_p must be a nonnegative finite number.")
-  }
-
-  col_l1 <- colSums(abs(Lambda))
-  col_l2 <- sqrt(colSums(Lambda^2))
-  logit_slab <- qlogis(slab_prior) +
-    effective_p * log(slab_penalty / spike_penalty) +
-    (spike_penalty - slab_penalty) * col_l1
-  logit_slab <- pmax(pmin(logit_slab, 35), -35)
-  slab_prob <- plogis(logit_slab)
-  penalty <- slab_prob * slab_penalty + (1 - slab_prob) * spike_penalty
-
-  list(
-    penalty = penalty,
-    slab_prob = slab_prob,
-    col_l1 = col_l1,
-    col_l2 = col_l2
-  )
 }
 
 mixture_parameter_log_prior <- function(
@@ -208,12 +170,11 @@ posterior_binary_probit_objective <- function(
   #   + log p(mixture parameters)
   #   + log p(Lambda).
   joint_binary_probit_objective(
-    X,
-    F_hat,
-    Lambda,
-    alpha = NULL,
-    mixture_fits,
+    X = X,
+    F_hat = F_hat,
+    Lambda = Lambda,
     alpha = alpha,
+    mixture_fits = mixture_fits,
     mixture_prior_weight = mixture_prior_weight
   ) +
     mixture_parameter_log_prior(
@@ -232,6 +193,10 @@ posterior_binary_probit_objective <- function(
 # ----------------------------------------------------------------------------
 
 probit_item_negloglik <- function(y, F_hat, beta, estimate_intercept = TRUE) {
+  # Smooth negative log likelihood for one item.  beta contains
+  # (alpha_j, lambda_j) when intercepts are estimated and only lambda_j
+  # otherwise.  The L1 penalty is handled by proximal steps in
+  # fit_probit_lasso_item(), not inside this smooth objective.
   if (isTRUE(estimate_intercept)) {
     alpha <- beta[1L]
     loading <- beta[-1L]
@@ -277,6 +242,10 @@ fit_probit_lasso_item <- function(
     estimate_intercept = TRUE,
     maxit = 200L,
     tol = 1e-6) {
+  # Pipeline role: update one item's alpha_j and loading row lambda_j given
+  # current factor scores.  This is proximal-gradient probit regression:
+  # gradient step on the binary likelihood, soft-threshold loadings, no
+  # shrinkage on the intercept.
   H <- ncol(F_hat)
   beta_loading <- if (is.null(beta_init)) rep(0, H) else as.numeric(beta_init)
   if (length(beta_loading) != H || any(!is.finite(beta_loading))) beta_loading <- rep(0, H)
@@ -339,6 +308,9 @@ update_binary_probit_loadings_glm <- function(
     lasso_tol = 1e-6,
     parallel = FALSE,
     workers = NULL) {
+  # Pipeline role: itemwise loading/intercept update in refinement.  Conditional
+  # on F, every item is an independent probit regression, so this step can be
+  # parallelized over item columns.
   X <- as.matrix(X)
   F_hat <- as.matrix(F_hat)
   p <- ncol(X)
@@ -480,8 +452,8 @@ update_one_factor_score <- function(
     factor_update = c("marginal", "conditional_soft", "conditional_hard"),
     mixture_prior_weight = 1,
     maxit = 50L) {
-  # Optimize one subject's H-dimensional factor vector while holding Lambda and
-  # the mixture prior fixed.
+  # Pipeline role: update one subject's H-dimensional factor score by MAP while
+  # holding Lambda, alpha, and the mixture prior fixed.
   factor_update <- match.arg(factor_update)
   x_i <- as.numeric(x_i)
   f_init <- as.numeric(f_init)
@@ -571,6 +543,9 @@ update_factor_scores_joint_map <- function(
     parallel = FALSE,
     workers = NULL,
     verbose = FALSE) {
+  # Pipeline role: update all subject factor scores.  This is usually the
+  # slowest refinement block in large n,p simulations because it solves n small
+  # H-dimensional optimizations, each evaluating all p item probabilities.
   factor_update <- match.arg(factor_update)
   X <- as.matrix(X)
   F_hat <- as.matrix(F_hat)
@@ -750,6 +725,8 @@ update_mixture_fits_refinement <- function(
     weight_prior_alpha = 1,
     parallel = FALSE,
     workers = NULL) {
+  # Pipeline role: refresh the independent marginal mixture prior after factor
+  # scores move.  Fixed component counts are preserved factor by factor.
   update_mixture_fits_fixed_G(
     F_hat = F_hat,
     mixture_fits = mixture_fits,
@@ -790,11 +767,6 @@ fit_binary_probit_refinement <- function(
     estimate_intercept = TRUE,
     preestimate_loadings = TRUE,
     lambda_l1_penalty = 0,
-    lambda_column_spike_slab = FALSE,
-    lambda_spike_penalty = 1,
-    lambda_slab_penalty = 0.05,
-    lambda_slab_prior = 0.5,
-    lambda_column_effective_p = 1,
     lasso_maxit = 200L,
     lasso_tol = 1e-6,
     normalize_factor_scale = TRUE,
@@ -811,6 +783,9 @@ fit_binary_probit_refinement <- function(
     workers = NULL,
     verbose = TRUE,
     ...) {
+  # Pipeline role: Stage 3 joint MAP refinement.  Starting from pretraining,
+  # alternate factor-score MAP updates, itemwise probit loading/intercept
+  # updates, factor scale/location normalization, and fixed-G mixture updates.
   factor_update <- match.arg(factor_update)
   mixture_update <- match.arg(mixture_update)
   factor_scale_method <- match.arg(factor_scale_method)
@@ -824,7 +799,6 @@ fit_binary_probit_refinement <- function(
   if (!is.finite(mixture_prior_weight) || mixture_prior_weight < 0) {
     stop("mixture_prior_weight must be a nonnegative finite number.")
   }
-  lambda_column_spike_slab <- isTRUE(lambda_column_spike_slab)
 
   # Initialize refinement from the output of the pretraining algorithm.
   F_hat <- pretrain_fit$F_hat
@@ -836,22 +810,7 @@ fit_binary_probit_refinement <- function(
   }
   mixture_fits <- pretrain_fit$mixture_fits
 
-  lambda_penalty_info <- if (lambda_column_spike_slab) {
-    lambda_column_spike_slab_penalties(
-      Lambda = Lambda,
-      spike_penalty = lambda_spike_penalty,
-      slab_penalty = lambda_slab_penalty,
-      slab_prior = lambda_slab_prior,
-      effective_p = lambda_column_effective_p
-    )
-  } else {
-    list(
-      penalty = coerce_lambda_l1_penalty(lambda_l1_penalty, ncol(Lambda)),
-      slab_prob = rep(NA_real_, ncol(Lambda)),
-      col_l1 = colSums(abs(Lambda)),
-      col_l2 = sqrt(colSums(Lambda^2))
-    )
-  }
+  lambda_l1_penalty_vec <- coerce_lambda_l1_penalty(lambda_l1_penalty, ncol(Lambda))
   lambda_penalty_history <- list()
 
   if (isTRUE(preestimate_loadings)) {
@@ -863,7 +822,7 @@ fit_binary_probit_refinement <- function(
       F_hat = F_hat,
       alpha_init = alpha,
       Lambda_init = Lambda,
-      lambda_l1_penalty = lambda_penalty_info$penalty,
+      lambda_l1_penalty = lambda_l1_penalty_vec,
       estimate_intercept = estimate_intercept,
       lasso_maxit = lasso_maxit,
       lasso_tol = lasso_tol,
@@ -876,15 +835,6 @@ fit_binary_probit_refinement <- function(
     } else {
       Lambda <- loading_fit
       alpha <- rep(0, ncol(X))
-    }
-    if (lambda_column_spike_slab) {
-      lambda_penalty_info <- lambda_column_spike_slab_penalties(
-        Lambda = Lambda,
-        spike_penalty = lambda_spike_penalty,
-        slab_penalty = lambda_slab_penalty,
-        slab_prior = lambda_slab_prior,
-        effective_p = lambda_column_effective_p
-      )
     }
   }
 
@@ -915,15 +865,14 @@ fit_binary_probit_refinement <- function(
   )
   initial_lambda_logprior <- lambda_laplace_log_prior(
     Lambda,
-    lambda_l1_penalty = lambda_penalty_info$penalty
+    lambda_l1_penalty = lambda_l1_penalty_vec
   )
   lambda_penalty_history[[1L]] <- data.frame(
     iteration = 0L,
     factor = seq_len(ncol(Lambda)),
-    column_l1 = lambda_penalty_info$col_l1,
-    column_l2 = lambda_penalty_info$col_l2,
-    slab_prob = lambda_penalty_info$slab_prob,
-    l1_penalty = lambda_penalty_info$penalty
+    column_l1 = colSums(abs(Lambda)),
+    column_l2 = sqrt(colSums(Lambda^2)),
+    l1_penalty = lambda_l1_penalty_vec
   )
   initial_joint_objective <- initial_binary_loglik +
     mixture_prior_weight * initial_mixture_loglik
@@ -941,9 +890,6 @@ fit_binary_probit_refinement <- function(
     objective_improvement = NA_real_,
     relative_objective_improvement = NA_real_,
     relative_objective_change = NA_real_,
-    G_hat_before_prune = paste(vapply(mixture_fits, function(z) length(z$pi), integer(1)),
-                               collapse = ","),
-    n_pruned_components = 0L,
     max_factor_scale_before_normalize = max(apply(F_hat, 2L, sd)),
     max_factor_scale_after_normalize = max(apply(F_hat, 2L, sd)),
     G_hat = paste(vapply(mixture_fits, function(z) length(z$pi), integer(1)),
@@ -953,7 +899,6 @@ fit_binary_probit_refinement <- function(
     normalize_seconds = NA_real_,
     lambda_update_seconds = NA_real_,
     mixture_update_seconds = NA_real_,
-    pruning_seconds = NA_real_,
     objective_seconds = NA_real_,
     iteration_seconds = NA_real_
   )
@@ -1030,21 +975,12 @@ fit_binary_probit_refinement <- function(
 
     # Step 2: update loadings given the refined factors.
     lambda_update_start <- Sys.time()
-    if (lambda_column_spike_slab) {
-      lambda_penalty_info <- lambda_column_spike_slab_penalties(
-        Lambda = Lambda,
-        spike_penalty = lambda_spike_penalty,
-        slab_penalty = lambda_slab_penalty,
-        slab_prior = lambda_slab_prior,
-        effective_p = lambda_column_effective_p
-      )
-    }
     loading_fit <- update_binary_probit_loadings_glm(
       X = X,
       F_hat = F_hat,
       alpha_init = alpha,
       Lambda_init = Lambda,
-      lambda_l1_penalty = lambda_penalty_info$penalty,
+      lambda_l1_penalty = lambda_l1_penalty_vec,
       estimate_intercept = estimate_intercept,
       lasso_maxit = lasso_maxit,
       lasso_tol = lasso_tol,
@@ -1057,15 +993,6 @@ fit_binary_probit_refinement <- function(
     } else {
       Lambda <- loading_fit
       alpha <- rep(0, ncol(X))
-    }
-    if (lambda_column_spike_slab) {
-      lambda_penalty_info <- lambda_column_spike_slab_penalties(
-        Lambda = Lambda,
-        spike_penalty = lambda_spike_penalty,
-        slab_penalty = lambda_slab_penalty,
-        slab_prior = lambda_slab_prior,
-        effective_p = lambda_column_effective_p
-      )
     }
     lambda_update_seconds <- as.numeric(difftime(Sys.time(), lambda_update_start, units = "secs"))
 
@@ -1089,10 +1016,6 @@ fit_binary_probit_refinement <- function(
     )
     mixture_update_seconds <- as.numeric(difftime(Sys.time(), mixture_update_start, units = "secs"))
 
-    G_before_prune <- vapply(mixture_fits, function(z) length(z$pi), integer(1))
-    n_pruned_components <- 0L
-    pruning_seconds <- 0
-
     # Track both pieces of the objective so we can see whether improvements
     # come from binary prediction, better mixture fit, or both.
     objective_start <- Sys.time()
@@ -1108,15 +1031,14 @@ fit_binary_probit_refinement <- function(
     )
     current_lambda_logprior <- lambda_laplace_log_prior(
       Lambda,
-      lambda_l1_penalty = lambda_penalty_info$penalty
+      lambda_l1_penalty = lambda_l1_penalty_vec
     )
     lambda_penalty_history[[iter + 1L]] <- data.frame(
       iteration = iter,
       factor = seq_len(ncol(Lambda)),
-      column_l1 = lambda_penalty_info$col_l1,
-      column_l2 = lambda_penalty_info$col_l2,
-      slab_prob = lambda_penalty_info$slab_prob,
-      l1_penalty = lambda_penalty_info$penalty
+      column_l1 = colSums(abs(Lambda)),
+      column_l2 = sqrt(colSums(Lambda^2)),
+      l1_penalty = lambda_l1_penalty_vec
     )
     current_objective <- current_binary_loglik +
       mixture_prior_weight * current_mixture_loglik
@@ -1150,8 +1072,6 @@ fit_binary_probit_refinement <- function(
       # Backward-compatible column name; this is now signed improvement, not
       # absolute change.
       relative_objective_change = relative_improvement,
-      G_hat_before_prune = paste(G_before_prune, collapse = ","),
-      n_pruned_components = n_pruned_components,
       max_factor_scale_before_normalize = max(scale_before_normalize),
       max_factor_scale_after_normalize = max(scale_after_normalize),
       G_hat = paste(vapply(mixture_fits, function(z) length(z$pi), integer(1)),
@@ -1161,7 +1081,6 @@ fit_binary_probit_refinement <- function(
       normalize_seconds = normalize_seconds,
       lambda_update_seconds = lambda_update_seconds,
       mixture_update_seconds = mixture_update_seconds,
-      pruning_seconds = pruning_seconds,
       objective_seconds = objective_seconds,
       iteration_seconds = iteration_seconds
     )
@@ -1220,22 +1139,6 @@ fit_binary_probit_refinement <- function(
     alpha <- selected_snapshot$alpha_hat
     Lambda <- selected_snapshot$Lambda_hat
     mixture_fits <- selected_snapshot$mixture_fits
-    lambda_penalty_info <- if (lambda_column_spike_slab) {
-      lambda_column_spike_slab_penalties(
-        Lambda = Lambda,
-        spike_penalty = lambda_spike_penalty,
-        slab_penalty = lambda_slab_penalty,
-        slab_prior = lambda_slab_prior,
-        effective_p = lambda_column_effective_p
-      )
-    } else {
-      list(
-        penalty = coerce_lambda_l1_penalty(lambda_l1_penalty, ncol(Lambda)),
-        slab_prob = rep(NA_real_, ncol(Lambda)),
-        col_l1 = colSums(abs(Lambda)),
-        col_l2 = sqrt(colSums(Lambda^2))
-      )
-    }
   }
 
   # Convert the returned marginal mixture responsibilities into hard labels.
@@ -1284,18 +1187,7 @@ fit_binary_probit_refinement <- function(
     mixture_prior_weight = mixture_prior_weight,
     estimate_intercept = estimate_intercept,
     lambda_l1_penalty = lambda_l1_penalty,
-    lambda_column_spike_slab = list(
-      enabled = lambda_column_spike_slab,
-      spike_penalty = lambda_spike_penalty,
-      slab_penalty = lambda_slab_penalty,
-      slab_prior = lambda_slab_prior,
-      effective_p = lambda_column_effective_p,
-      final_column_l1 = colSums(abs(Lambda)),
-      final_column_l2 = sqrt(colSums(Lambda^2)),
-      final_slab_prob = lambda_penalty_info$slab_prob,
-      final_l1_penalty = lambda_penalty_info$penalty,
-      history = if (length(lambda_penalty_history)) do.call(rbind, lambda_penalty_history) else NULL
-    ),
+    lambda_penalty_history = if (length(lambda_penalty_history)) do.call(rbind, lambda_penalty_history) else NULL,
     lasso_maxit = lasso_maxit,
     lasso_tol = lasso_tol,
     normalize_factor_scale = normalize_factor_scale,
@@ -1332,11 +1224,6 @@ fit_binary_probit_pretrain_then_refine <- function(
     min_mixture_var = 1e-3,
     mixture_prior_weight = 1,
     lambda_l1_penalty = 0,
-    lambda_column_spike_slab = FALSE,
-    lambda_spike_penalty = 1,
-    lambda_slab_penalty = 0.05,
-    lambda_slab_prior = 0.5,
-    lambda_column_effective_p = 1,
     normalize_factor_scale = TRUE,
     normalize_factor_location = TRUE,
     factor_scale_target = 1,
@@ -1379,11 +1266,6 @@ fit_binary_probit_pretrain_then_refine <- function(
     min_mixture_var = min_mixture_var,
     mixture_prior_weight = mixture_prior_weight,
     lambda_l1_penalty = lambda_l1_penalty,
-    lambda_column_spike_slab = lambda_column_spike_slab,
-    lambda_spike_penalty = lambda_spike_penalty,
-    lambda_slab_penalty = lambda_slab_penalty,
-    lambda_slab_prior = lambda_slab_prior,
-    lambda_column_effective_p = lambda_column_effective_p,
     normalize_factor_scale = normalize_factor_scale,
     normalize_factor_location = normalize_factor_location,
     factor_scale_target = factor_scale_target,
