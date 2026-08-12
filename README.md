@@ -33,8 +33,8 @@ Selected checkpoint plots and tables are stored in `results/selected_plots/sampl
 The IFEval analysis includes:
 
 - singular-value shelf diagnostics for the augmented probit matrix
-- BIC-style spectral rank selection and Bai-Ng `ICp2` rank diagnostics
-- missing-aware rank selection by held-out probit likelihood
+- Bai-Ng `ICp2` rank diagnostics
+- missing-aware rank selection by held-out probit likelihood, held-out BIC, and training BIC
 - ordinary binary probit factor comparison
 - tuned sparse loading penalty for the mixture model
 - selected `H = 3, G = 3` loading interpretation

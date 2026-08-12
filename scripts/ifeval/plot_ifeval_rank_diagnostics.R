@@ -2,11 +2,12 @@
 
 # IFEval rank diagnostics:
 #   1. singular-value shelf from an intercept-only probit augmentation;
-#   2. BIC-style spectral rank selection on the same augmented matrix.
+#   2. Bai-Ng ICp2 plug-in criterion on the same augmented matrix.
 #
-# These diagnostics are descriptive complements to the held-out predictive
+# These diagnostics are descriptive complements to the random-cell holdout
 # rank-selection scripts.  They are intentionally lightweight: no model fitting
-# over H is required.
+# over H is required.  Model-based held-out BIC is computed in
+# summarize_openeval_rank_selection_cv.R from the fold-score files.
 
 options(stringsAsFactors = FALSE)
 
@@ -60,11 +61,9 @@ make_intercept_augmented_Z <- function(X) {
 }
 
 spectral_rank_table <- function(Z, H_max, center = TRUE) {
-  # BIC-style criterion for a rank-H Gaussian working approximation to the
-  # augmented latent matrix:
-  #   BIC(H) = N log(SSE_H / N) + df_H log(N),
-  # where df_H = H(n + p - H) is the dimension of a rank-H n-by-p matrix.
-  # Dividing by N gives a per-cell scale that is easier to plot.
+  # Singular values and the Bai-Ng ICp2 plug-in criterion for the augmented
+  # latent matrix.  This is not a model BIC; it is a quick spectral diagnostic
+  # used to see whether there is a visible singular-value shelf.
   Z_work <- if (isTRUE(center)) sweep(Z, 2L, colMeans(Z), "-") else Z
   n <- nrow(Z_work)
   p <- ncol(Z_work)
@@ -76,10 +75,7 @@ spectral_rank_table <- function(Z, H_max, center = TRUE) {
   sse <- pmax(total_sse - cumulative_signal, .Machine$double.eps)
   N <- n * p
   H <- seq_len(H_max)
-  df <- H * (n + p - H)
   residual_variance <- sse / N
-  bic <- N * log(residual_variance) + df * log(N)
-  bic_per_response <- bic / N
   icp2_penalty <- (n + p) / (n * p) * log(min(n, p))
   icp2 <- log(residual_variance) + H * icp2_penalty
 
@@ -88,10 +84,6 @@ spectral_rank_table <- function(Z, H_max, center = TRUE) {
     singular_value = d[H],
     singular_value_ratio_to_next = d[H] / c(d[H[-1L]], if (length(d) > H_max) d[H_max + 1L] else NA_real_),
     residual_variance = residual_variance,
-    effective_df_rank_H = df,
-    spectral_bic = bic,
-    spectral_bic_per_response = bic_per_response,
-    selected_by_spectral_bic = bic == min(bic),
     bai_ng_icp2 = icp2,
     selected_by_bai_ng_icp2 = icp2 == min(icp2)
   )
@@ -113,21 +105,12 @@ plot_rank_diagnostics <- function(rank_df, out_dir) {
   par(op)
   dev.off()
 
-  png(file.path(out_dir, "ifeval_spectral_bic_rank_selection.png"), width = 1500, height = 850, res = 160)
-  op <- par(mfrow = c(1, 2), mar = c(4.5, 4.5, 3, 1))
-
-  plot(rank_df$H, rank_df$spectral_bic_per_response, type = "b", pch = 19, lwd = 2,
-       col = "#2B6CB0", xlab = "candidate rank H", ylab = "BIC / response",
-       main = "BIC-Style Spectral Rank Selection")
-  abline(v = rank_df$H[rank_df$selected_by_spectral_bic][1L], lty = 2, col = "#BC4749")
-  grid(col = "gray85")
-
+  png(file.path(out_dir, "ifeval_bai_ng_icp2_rank_diagnostic.png"), width = 1100, height = 850, res = 160)
   plot(rank_df$H, rank_df$bai_ng_icp2, type = "b", pch = 19, lwd = 2,
        col = "#4A5568", xlab = "candidate rank H", ylab = "ICp2",
        main = "Bai-Ng ICp2 Plug-In")
   abline(v = rank_df$H[rank_df$selected_by_bai_ng_icp2][1L], lty = 2, col = "#BC4749")
   grid(col = "gray85")
-  par(op)
   dev.off()
 }
 
@@ -137,7 +120,7 @@ rank_df <- spectral_rank_table(aug$Z, H_max = H_max, center = center_augmented_Z
 
 singular_out <- rank_df[, c("H", "singular_value", "singular_value_ratio_to_next"), drop = FALSE]
 write.csv(singular_out, file.path(out_dir, "ifeval_singular_value_shelf.csv"), row.names = FALSE)
-write.csv(rank_df, file.path(out_dir, "ifeval_spectral_bic_rank_selection.csv"), row.names = FALSE)
+write.csv(rank_df, file.path(out_dir, "ifeval_bai_ng_icp2_rank_diagnostic.csv"), row.names = FALSE)
 write.csv(
   data.frame(item = colnames(X), intercept_only_alpha = aug$alpha),
   file.path(out_dir, "ifeval_intercept_only_alpha_for_rank_diagnostics.csv"),
@@ -147,5 +130,4 @@ write.csv(
 plot_rank_diagnostics(rank_df, out_dir)
 
 cat("\nIFEval rank diagnostics written to:\n", out_dir, "\n", sep = "")
-cat("Selected H by spectral BIC: ", rank_df$H[rank_df$selected_by_spectral_bic][1L], "\n", sep = "")
 cat("Selected H by Bai-Ng ICp2: ", rank_df$H[rank_df$selected_by_bai_ng_icp2][1L], "\n", sep = "")

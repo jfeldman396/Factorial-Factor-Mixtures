@@ -7,7 +7,7 @@ cd "$SCRIPT_DIR"
 
 mkdir -p "$ROOT/results"
 
-echo "Step 1: singular-value shelf and BIC-style spectral rank diagnostics"
+echo "Step 1: singular-value shelf and Bai-Ng ICp2 rank diagnostics"
 MATRIX_PATH="$ROOT/data/ifeval/openeval_ifeval_only_binary_matrix.csv" \
 OUT_DIR="$ROOT/results/reproduced_openeval_ifeval_rank_diagnostics" \
 H_MAX=10 \
@@ -24,7 +24,9 @@ REFINE_ITER=5 \
 LAMBDA_L1=2 \
 Rscript openeval_ordinary_probit_cv_H_selection.R
 
-echo "Step 3: summarize predictive rank-selection comparison"
+echo "Step 3: summarize held-out log likelihood, held-out BIC, and training BIC rank selection"
+ORDINARY_H_SUMMARY="$ROOT/results/openeval_ifeval_cv_H1_10_ordinary/ordinary_probit_H_summary.csv" \
+ORDINARY_FOLD_SCORES="$ROOT/results/openeval_ifeval_cv_H1_10_ordinary/ordinary_probit_factor_fold_scores.csv" \
 OUT_DIR="$ROOT/results/reproduced_openeval_ifeval_rank_selection_comparison" \
 Rscript summarize_openeval_rank_selection_cv.R
 

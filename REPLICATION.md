@@ -57,9 +57,9 @@ The cleaned input files are:
 
 The main selected model is the independent-mixture binary probit factor model with `H = 3`, `G = 3`, item intercepts `alpha_j`, and sparse loadings selected by the lambda penalty tuning step.
 
-### Rank Diagnostics: Singular-Value Shelf And BIC
+### Rank Diagnostics: Singular-Value Shelf And Bai-Ng ICp2
 
-Before fitting the selected model, run the lightweight spectral rank diagnostics:
+Before fitting the selected model, run the lightweight spectral diagnostics:
 
 ```sh
 MATRIX_PATH=data/ifeval/openeval_ifeval_only_binary_matrix.csv \
@@ -72,12 +72,10 @@ This produces:
 
 - `ifeval_singular_value_shelf.csv`;
 - `ifeval_singular_value_shelf.png`;
-- `ifeval_spectral_bic_rank_selection.csv`;
-- `ifeval_spectral_bic_rank_selection.png`.
+- `ifeval_bai_ng_icp2_rank_diagnostic.csv`;
+- `ifeval_bai_ng_icp2_rank_diagnostic.png`.
 
-The singular-value shelf is computed from an intercept-only probit augmentation of the binary matrix. The BIC-style rank criterion scores rank-`H` spectral approximations to that augmented matrix using
-`N log(SSE_H / N) + H(n + p - H) log(N)`.
-The same output also reports the Bai-Ng `ICp2` plug-in criterion for comparison.
+The singular-value shelf is computed from an intercept-only probit augmentation of the binary matrix. The same output reports the Bai-Ng `ICp2` plug-in criterion for comparison.
 
 ### Refit The Selected Mixture Model
 
@@ -213,6 +211,8 @@ The repository includes lightweight CV summary inputs for the mixture rank-selec
 - `results/selected_tables/ifeval/cv_inputs/mixture_G2_fold_scores.csv`;
 - `results/selected_tables/ifeval/cv_inputs/mixture_G3_H_summary.csv`;
 - `results/selected_tables/ifeval/cv_inputs/mixture_G3_fold_scores.csv`.
+- `results/selected_tables/ifeval/cv_inputs/ordinary_probit_H_summary.csv`;
+- `results/selected_tables/ifeval/cv_inputs/ordinary_probit_factor_fold_scores.csv`.
 
 To rerun the ordinary-probit CV from the raw IFEval matrix:
 
@@ -240,6 +240,14 @@ ORDINARY_FOLD_SCORES=results/full/ifeval/openeval_ifeval_cv_H1_10_ordinary/ordin
 OUT_DIR=results/full/ifeval/reproduced_openeval_ifeval_rank_selection_comparison \
 Rscript scripts/ifeval/summarize_openeval_rank_selection_cv.R
 ```
+
+If you do not rerun the ordinary-probit CV first, the summary script defaults to the committed ordinary-probit CV inputs in `results/selected_tables/ifeval/cv_inputs/`.
+
+This summary reports three criteria by candidate rank:
+
+- held-out predictive log likelihood on the randomly removed cells;
+- held-out BIC, `-2 log L_heldout + df log(N_heldout)`;
+- training BIC, `-2 log L_train + df log(N_train)`.
 
 The heavy per-fold mixture-CV `.rds` files are not committed. The committed summaries are sufficient to regenerate the paper-facing rank-selection comparison tables and plots.
 
