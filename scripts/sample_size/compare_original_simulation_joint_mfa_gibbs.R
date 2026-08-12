@@ -859,6 +859,7 @@ fit_joint_class_probit_mfa_gibbs <- function(
 
   keep_F <- matrix(0, n, H)
   keep_alpha <- numeric(p)
+  keep_alpha_raw <- numeric(p)
   keep_Lambda <- matrix(0, p, H)
   keep_pi <- numeric(K)
   keep_mu <- matrix(0, K, H)
@@ -929,6 +930,7 @@ fit_joint_class_probit_mfa_gibbs <- function(
     )
     alpha <- regression_draw$alpha
     Lambda <- regression_draw$Lambda
+    alpha_raw <- alpha
 
     if (isTRUE(normalize_scale)) {
       norm_out <- normalize_joint_mfa_scale(
@@ -976,6 +978,7 @@ fit_joint_class_probit_mfa_gibbs <- function(
     if (iter > burn && ((iter - burn) %% thin == 0L)) {
       keep_F <- keep_F + F
       keep_alpha <- keep_alpha + alpha
+      keep_alpha_raw <- keep_alpha_raw + alpha_raw
       keep_Lambda <- keep_Lambda + Lambda
       keep_pi <- keep_pi + pi_vec
       keep_mu <- keep_mu + mu
@@ -1012,6 +1015,7 @@ fit_joint_class_probit_mfa_gibbs <- function(
   if (n_keep > 0L) {
     F_hat <- keep_F / n_keep
     alpha_hat <- keep_alpha / n_keep
+    alpha_raw_hat <- keep_alpha_raw / n_keep
     Lambda_hat <- keep_Lambda / n_keep
     pi_hat <- keep_pi / n_keep
     mu_hat <- keep_mu / n_keep
@@ -1019,6 +1023,7 @@ fit_joint_class_probit_mfa_gibbs <- function(
   } else {
     F_hat <- F
     alpha_hat <- alpha
+    alpha_raw_hat <- if (exists("alpha_raw", inherits = FALSE)) alpha_raw else alpha
     Lambda_hat <- Lambda
     pi_hat <- pi_vec
     mu_hat <- mu
@@ -1028,6 +1033,7 @@ fit_joint_class_probit_mfa_gibbs <- function(
   list(
     F_hat = F_hat,
     alpha_hat = alpha_hat,
+    alpha_raw_hat = alpha_raw_hat,
     Lambda_hat = Lambda_hat,
     C = C,
     pi = pi_hat,
@@ -1063,6 +1069,7 @@ evaluate_fit <- function(
     Lambda_hat,
     seconds,
     alpha_hat = NULL,
+    alpha_raw_hat = NULL,
     C_hat = NULL,
     mixture_fits = NULL) {
   align <- align_factors(sim$F, F_hat)
@@ -1071,7 +1078,13 @@ evaluate_fit <- function(
   true_eta <- sweep(sim$F %*% t(sim$Lambda), 2L, true_alpha, "+")
   F_aligned <- sweep(F_hat[, align$est_index, drop = FALSE], 2L, align$signs, "*")
   if (is.null(alpha_hat)) alpha_hat <- rep(0, nrow(Lambda_aligned))
+  if (is.null(alpha_raw_hat)) alpha_raw_hat <- rep(NA_real_, length(alpha_hat))
   eta_hat <- sweep(F_aligned %*% t(Lambda_aligned), 2L, alpha_hat, "+")
+  alpha_raw_rmse <- if (all(!is.finite(alpha_raw_hat))) {
+    NA_real_
+  } else {
+    sqrt(mean((true_alpha - alpha_raw_hat)^2, na.rm = TRUE))
+  }
   prob_rmse <- sqrt(mean((pnorm(true_eta) - pnorm(eta_hat))^2))
   true_joint <- joint_class_index(sim$component, G)
 
@@ -1092,6 +1105,8 @@ evaluate_fit <- function(
     lambda_rmse = sqrt(mean((sim$Lambda - Lambda_aligned)^2)),
     alpha_corr = safe_cor(true_alpha, alpha_hat),
     alpha_rmse = sqrt(mean((true_alpha - alpha_hat)^2)),
+    alpha_raw_corr = safe_cor(true_alpha, alpha_raw_hat),
+    alpha_raw_rmse = alpha_raw_rmse,
     probability_rmse = prob_rmse,
     joint_profile_ari = joint_ari,
     seconds = seconds,
@@ -1342,6 +1357,7 @@ for (row_idx in seq_len(nrow(design_grid))) {
       Lambda_hat = mfa$Lambda_hat,
       seconds = mfa$seconds,
       alpha_hat = mfa$alpha_hat,
+      alpha_raw_hat = mfa$alpha_raw_hat,
       C_hat = mfa$C
     )
     mfa_align <- align_factors(sim$F, mfa$F_hat)
@@ -1425,6 +1441,7 @@ summarize_results <- function(results) {
   )
   metric_cols <- c(
     "mean_factor_abs_cor", "min_factor_abs_cor", "lambda_corr", "lambda_rmse",
+    "alpha_corr", "alpha_rmse", "alpha_raw_corr", "alpha_raw_rmse",
     "probability_rmse", "joint_profile_ari", "joint_mu_rmse", "joint_var_rmse",
     "joint_mu_corr", "joint_var_corr", "joint_weight_corr", "joint_weight_l1",
     "flat_parameter_corr", "all_parameter_corr", "all_parameter_corr_raw",
@@ -1482,6 +1499,7 @@ make_sample_size_threshold_summary <- function(summary) {
     data.frame(
       base,
       n_for_factor_corr = first_n_reaching(d, "mean_factor_abs_cor", success_factor_corr),
+      n_for_alpha_corr = first_n_reaching(d, "alpha_corr", success_parameter_corr),
       n_for_lambda_corr = first_n_reaching(d, "lambda_corr", success_factor_corr),
       n_for_joint_mu_corr = first_n_reaching(d, "joint_mu_corr", success_parameter_corr),
       n_for_joint_var_corr = first_n_reaching(d, "joint_var_corr", success_parameter_corr),
@@ -1504,6 +1522,10 @@ write.csv(
 plot_metric_bars <- function(summary, out_file) {
   metrics <- c(
     "mean_factor_abs_cor",
+    "alpha_corr",
+    "alpha_rmse",
+    "alpha_raw_corr",
+    "alpha_raw_rmse",
     "lambda_corr",
     "joint_mu_rmse",
     "joint_mu_corr",
@@ -1527,7 +1549,7 @@ plot_metric_bars <- function(summary, out_file) {
   for (metric in metrics) {
     vals <- summary[[metric]]
     ylim <- range(c(0, vals), na.rm = TRUE)
-    if (metric %in% c("mean_factor_abs_cor", "lambda_corr", "joint_profile_ari")) {
+    if (metric %in% c("mean_factor_abs_cor", "alpha_corr", "alpha_raw_corr", "lambda_corr", "joint_profile_ari")) {
       ylim <- c(0, 1)
     }
     cols <- ifelse(summary$method == "independent_marginal_mixture", "#377eb8", "#e41a1c")
@@ -1552,6 +1574,8 @@ plot_sample_size_correlation_lines <- function(summary, out_file) {
   corr_metrics <- c(
     flat_parameter_corr = "flat all-parameter",
     all_parameter_corr = "all parameters",
+    alpha_corr = "intercept",
+    alpha_raw_corr = "raw Gibbs intercept",
     mean_factor_abs_cor = "factor score",
     lambda_corr = "loading",
     joint_mu_corr = "joint mixture mean",

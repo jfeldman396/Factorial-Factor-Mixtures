@@ -342,16 +342,46 @@ plot_all_parameter_panels <- function(results, out_dir) {
 }
 
 flat_summary <- summarize_metric(results, "flat_parameter_corr")
+alpha_summary <- summarize_metric(results, "alpha_corr")
+alpha_rmse_summary <- summarize_metric(results, "alpha_rmse")
+alpha_raw_summary <- if ("alpha_raw_corr" %in% names(results)) summarize_metric(results, "alpha_raw_corr") else data.frame()
+alpha_raw_rmse_summary <- if ("alpha_raw_rmse" %in% names(results)) summarize_metric(results, "alpha_raw_rmse") else data.frame()
 var_summary <- summarize_metric(results, "joint_var_corr")
 lambda_summary <- summarize_metric(results, "lambda_corr")
 time_summary <- summarize_metric(results, "seconds")
 
 write.csv(flat_summary, file.path(out_dir, "checkpoint_flat_parameter_corr_summary.csv"), row.names = FALSE)
+write.csv(alpha_summary, file.path(out_dir, "checkpoint_alpha_corr_summary.csv"), row.names = FALSE)
+write.csv(alpha_rmse_summary, file.path(out_dir, "checkpoint_alpha_rmse_summary.csv"), row.names = FALSE)
+if (nrow(alpha_raw_summary)) {
+  write.csv(alpha_raw_summary, file.path(out_dir, "checkpoint_alpha_raw_corr_summary.csv"), row.names = FALSE)
+}
+if (nrow(alpha_raw_rmse_summary)) {
+  write.csv(alpha_raw_rmse_summary, file.path(out_dir, "checkpoint_alpha_raw_rmse_summary.csv"), row.names = FALSE)
+}
 write.csv(var_summary, file.path(out_dir, "checkpoint_joint_var_corr_summary.csv"), row.names = FALSE)
 write.csv(lambda_summary, file.path(out_dir, "checkpoint_lambda_corr_summary.csv"), row.names = FALSE)
 write.csv(time_summary, file.path(out_dir, "checkpoint_seconds_summary.csv"), row.names = FALSE)
 
 plot_metric(flat_summary, "flat parameter correlation", file.path(out_dir, "checkpoint_flat_parameter_corr_lines.png"))
+plot_metric(alpha_summary, "alpha correlation", file.path(out_dir, "checkpoint_alpha_corr_lines.png"))
+if (nrow(alpha_raw_summary)) {
+  plot_metric(alpha_raw_summary, "raw Gibbs alpha correlation", file.path(out_dir, "checkpoint_alpha_raw_corr_lines.png"))
+}
+plot_metric(
+  alpha_rmse_summary,
+  "alpha RMSE",
+  file.path(out_dir, "checkpoint_alpha_rmse_lines.png"),
+  ylim = range(c(0, alpha_rmse_summary$upper, alpha_rmse_summary$mean), na.rm = TRUE)
+)
+if (nrow(alpha_raw_rmse_summary)) {
+  plot_metric(
+    alpha_raw_rmse_summary,
+    "raw Gibbs alpha RMSE",
+    file.path(out_dir, "checkpoint_alpha_raw_rmse_lines.png"),
+    ylim = range(c(0, alpha_raw_rmse_summary$upper, alpha_raw_rmse_summary$mean), na.rm = TRUE)
+  )
+}
 plot_metric(var_summary, "joint variance correlation", file.path(out_dir, "checkpoint_joint_var_corr_lines.png"), ylim = c(-0.1, 1.02))
 plot_metric(lambda_summary, "lambda correlation", file.path(out_dir, "checkpoint_lambda_corr_lines.png"))
 plot_metric(time_summary, "seconds", file.path(out_dir, "checkpoint_seconds_lines.png"), ylim = range(c(0, time_summary$upper, time_summary$mean), na.rm = TRUE))
