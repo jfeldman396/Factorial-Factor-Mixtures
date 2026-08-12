@@ -57,6 +57,28 @@ The cleaned input files are:
 
 The main selected model is the independent-mixture binary probit factor model with `H = 3`, `G = 3`, item intercepts `alpha_j`, and sparse loadings selected by the lambda penalty tuning step.
 
+### Rank Diagnostics: Singular-Value Shelf And BIC
+
+Before fitting the selected model, run the lightweight spectral rank diagnostics:
+
+```sh
+MATRIX_PATH=data/ifeval/openeval_ifeval_only_binary_matrix.csv \
+OUT_DIR=results/full/ifeval/reproduced_openeval_ifeval_rank_diagnostics \
+H_MAX=10 \
+Rscript scripts/ifeval/plot_ifeval_rank_diagnostics.R
+```
+
+This produces:
+
+- `ifeval_singular_value_shelf.csv`;
+- `ifeval_singular_value_shelf.png`;
+- `ifeval_spectral_bic_rank_selection.csv`;
+- `ifeval_spectral_bic_rank_selection.png`.
+
+The singular-value shelf is computed from an intercept-only probit augmentation of the binary matrix. The BIC-style rank criterion scores rank-`H` spectral approximations to that augmented matrix using
+`N log(SSE_H / N) + H(n + p - H) log(N)`.
+The same output also reports the Bai-Ng `ICp2` plug-in criterion for comparison.
+
 ### Refit The Selected Mixture Model
 
 Run:
