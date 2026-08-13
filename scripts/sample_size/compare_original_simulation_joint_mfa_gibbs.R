@@ -603,6 +603,7 @@ align_joint_mixture_parameters <- function(true_params, est_pi, est_mu, est_sig2
     joint_mu_corr = suppressWarnings(cor(as.vector(true_mu), as.vector(est_mu_aligned))),
     joint_var_corr = suppressWarnings(cor(as.vector(true_var), as.vector(est_var_aligned))),
     joint_weight_corr = suppressWarnings(cor(true_weight, est_weight_aligned)),
+    joint_weight_rmse = sqrt(mean((true_weight - est_weight_aligned)^2)),
     joint_weight_l1 = sum(abs(true_weight - est_weight_aligned)),
     joint_weight_max_abs_error = max(abs(true_weight - est_weight_aligned)),
     est_effective_classes_001 = sum(est_pi > 0.001),
@@ -1443,7 +1444,8 @@ summarize_results <- function(results) {
     "mean_factor_abs_cor", "min_factor_abs_cor", "lambda_corr", "lambda_rmse",
     "alpha_corr", "alpha_rmse", "alpha_raw_corr", "alpha_raw_rmse",
     "probability_rmse", "joint_profile_ari", "joint_mu_rmse", "joint_var_rmse",
-    "joint_mu_corr", "joint_var_corr", "joint_weight_corr", "joint_weight_l1",
+    "joint_mu_corr", "joint_var_corr", "joint_weight_corr", "joint_weight_rmse",
+    "joint_weight_l1",
     "flat_parameter_corr", "all_parameter_corr", "all_parameter_corr_raw",
     "joint_weight_max_abs_error", "est_effective_classes_001",
     "est_effective_classes_01", "seconds", "mfa_seconds_per_iter"
