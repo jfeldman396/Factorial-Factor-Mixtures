@@ -38,6 +38,10 @@ method_labels <- c(
   independent_marginal_mixture = "product mixture",
   joint_mixture_factor_gibbs = "joint Gibbs"
 )
+loading_labels <- c(
+  balanced_moderate_few_positive_cross = 'Loadings = "Sparse"',
+  balanced_moderate_dense_signed_cross = 'Loadings = "Cross"'
+)
 
 compute_weight_rmse_from_recovery_tables <- function(out_dir) {
   files <- list.files(out_dir, pattern = "^joint_parameter_recovery_.*[.]csv$", full.names = TRUE)
@@ -122,6 +126,8 @@ plot_recovery_panel <- function(summary, loading_design, H_value, G_value, out_f
     drop = FALSE
   ]
   if (!nrow(d0)) return(invisible(FALSE))
+  loading_label <- loading_labels[[loading_design]]
+  if (is.null(loading_label)) loading_label <- loading_design
 
   n_col <- 3L
   n_row <- ceiling(length(metric_labels) / n_col)
@@ -205,7 +211,7 @@ plot_recovery_panel <- function(summary, loading_design, H_value, G_value, out_f
   mtext(
     sprintf(
       "%s | H=%d, G=%d: mean recovery metrics +/- 2 sd",
-      loading_design,
+      loading_label,
       H_value,
       G_value
     ),
