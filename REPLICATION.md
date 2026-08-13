@@ -352,6 +352,68 @@ The plotting script produces:
 - progress heatmap;
 - all-parameter panel plots by `H, G, loading_design`.
 
+### Regenerate Paper-Facing Sample-Size Figures
+
+The selected paper-facing simulation plots are generated from the checkpoint
+CSV and the exact DGP loading generator. Set `OUT_DIR` to the full simulation
+output directory:
+
+```sh
+OUT_DIR=results/full/moderate_crossloading_joint_mfa_sample_size_p500_25reps_H3H4_G2G3_MAP_intercepts_centered
+```
+
+To regenerate the representative DGP loading heatmaps for
+`Loadings = "Sparse"` and `Loadings = "Cross"` at `H = 3, 4`:
+
+```sh
+OUT_DIR=$OUT_DIR \
+Rscript scripts/sample_size/plot_dgp_loading_heatmaps.R
+```
+
+This writes:
+
+- `dgp_lambda_heatmap_sparse_H3.png`;
+- `dgp_lambda_heatmap_sparse_H4.png`;
+- `dgp_lambda_heatmap_cross_H3.png`;
+- `dgp_lambda_heatmap_cross_H4.png`;
+- matching `dgp_lambda_matrix_*.csv` files containing the exact representative
+  loading matrices shown in the heatmaps.
+
+To regenerate the six-panel recovery figures for each loading/H/G setting:
+
+```sh
+OUT_DIR=$OUT_DIR \
+Rscript scripts/sample_size/plot_sample_size_rmse_panels.R
+```
+
+These figures report RMSE for item intercepts, loadings, mixture means,
+mixture variances, and mixture weights, plus the flattened factor-score
+correlation. The mixture-weight RMSE is computed by vectorizing the aligned
+joint-profile weights and taking the RMSE against the true profile weights.
+
+To regenerate the runtime figures:
+
+```sh
+OUT_DIR=$OUT_DIR \
+Rscript scripts/sample_size/plot_sample_size_timing_lines.R
+```
+
+These figures plot mean `log(seconds)` with `+/- 2` standard deviations across
+Monte Carlo repetitions. The `seconds` field is total elapsed wall-clock time
+for each method fit; for the Gibbs comparator it includes the configured 2000
+Gibbs iterations and 1000 burn-in iterations.
+
+To refresh the committed selected copies after regenerating full outputs:
+
+```sh
+cp "$OUT_DIR"/dgp_lambda_heatmap_*.png results/selected_plots/sample_size/
+cp "$OUT_DIR"/checkpoint_parameter_recovery_panel_*.png results/selected_plots/sample_size/
+cp "$OUT_DIR"/checkpoint_timing_log_seconds_*.png results/selected_plots/sample_size/
+cp "$OUT_DIR"/dgp_lambda_matrix_*.csv results/selected_tables/sample_size/
+cp "$OUT_DIR"/checkpoint_parameter_recovery_summary.csv results/selected_tables/sample_size/
+cp "$OUT_DIR"/checkpoint_timing_log_seconds_summary.csv results/selected_tables/sample_size/
+```
+
 ### Interpret Simulation Metrics
 
 The main correlation metrics are computed after aligning estimated factors/loadings to the data-generating factors/loadings by best signed permutation.

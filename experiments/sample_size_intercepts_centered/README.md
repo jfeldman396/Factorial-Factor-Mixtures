@@ -20,3 +20,20 @@ Checkpoint plots can be regenerated with:
 ```sh
 Rscript scripts/sample_size/plot_moderate_crossloading_checkpoint.R
 ```
+
+Paper-facing selected plots can be regenerated from the completed checkpoint
+with:
+
+```sh
+OUT_DIR=results/full/moderate_crossloading_joint_mfa_sample_size_p500_25reps_H3H4_G2G3_MAP_intercepts_centered \
+Rscript scripts/sample_size/plot_dgp_loading_heatmaps.R
+
+OUT_DIR=results/full/moderate_crossloading_joint_mfa_sample_size_p500_25reps_H3H4_G2G3_MAP_intercepts_centered \
+Rscript scripts/sample_size/plot_sample_size_rmse_panels.R
+
+OUT_DIR=results/full/moderate_crossloading_joint_mfa_sample_size_p500_25reps_H3H4_G2G3_MAP_intercepts_centered \
+Rscript scripts/sample_size/plot_sample_size_timing_lines.R
+```
+
+These produce the DGP Lambda heatmaps, six-panel RMSE recovery plots, and
+`log(seconds)` timing plots for every loading/H/G setting.
