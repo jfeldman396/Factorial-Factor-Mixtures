@@ -1,7 +1,7 @@
 #!/usr/bin/env Rscript
 
 # Plot parameter recovery metrics from the sample-size comparison. Most panels
-# are RMSE/error metrics; the factor-score panels report correlations.
+# are RMSE metrics; the factor-score panels report correlations.
 # The input is the resumable comparison_results_checkpoint.csv produced by
 # compare_original_simulation_joint_mfa_gibbs.R.
 
@@ -168,7 +168,7 @@ plot_recovery_panel <- function(summary, loading_design, H_value, G_value, out_f
       log = if (length(ns) > 1L) "x" else "",
       xaxt = "n",
       xlab = "n",
-      ylab = if (metric %in% correlation_metrics) "correlation" else "RMSE / error",
+      ylab = if (metric %in% correlation_metrics) "correlation" else "RMSE",
       main = metric_labels[[metric]]
     )
     axis(1, at = ns, labels = ns)
