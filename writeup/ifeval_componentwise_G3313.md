@@ -109,16 +109,19 @@ The numeric loading summary also shows this structure:
 
 ## Factor Interpretation
 
-The loadings give the item-level interpretation of the factors. A strong solo-loading item has one dominant loading and small loadings on the other coordinates, so it is useful for naming a factor. A cross-loading item has large loadings on more than one coordinate, so it reveals tasks that require a combination of abilities.
+The loadings give the item-level interpretation of the factors. A strong solo-loading item has one dominant loading and small loadings on the other coordinates, so it is useful for naming a factor. A cross-loading item has large loadings on more than one coordinate, so it reveals tasks that require a combination of abilities. This section lists exact IFEval item ids, fitted loading values, and the item text or constraint being measured.
 
-Strong solo-loading examples include:
+### Specific Strong Solo-Loading Items
 
-| Primary factor | Item | Loadings `(F1,F2,F3,F4)` | Example constraint |
-| --- | --- | --- | --- |
-| F1 | `ifeval_20260421T021146Z_242` | `(1.758, 0.000, 0.000, 0.000)` | Repeat the request exactly, then answer with a title in double angle brackets. |
-| F2 | `ifeval_20260421T021146Z_293` | `(0.137, 3.071, 0.105, 0.000)` | Product description entirely in lowercase. |
-| F3 | `ifeval_20260421T021146Z_277` | `(0.167, -0.087, 1.637, 0.343)` | Write a rubric as a poem while using the letter `w` fewer than two times. |
-| F4 | `ifeval_20260421T021146Z_359` | `(0.479, 0.248, 0.000, 1.207)` | Use fewer than 10 sentences and end with a required sentence. |
+These items have one clearly dominant loading. They are the cleanest examples for interpreting each coordinate.
+
+- **F1 solo item:** `ifeval_20260421T021146Z_242`, with loadings `(1.758, 0.000, 0.000, 0.000)`. The item asks the model to first repeat the request word for word, then name a black dog, and include a title wrapped in double angular brackets. This is a clean broad instruction-following item because success requires remembering and executing several explicit instructions in sequence.
+
+- **F2 solo item:** `ifeval_20260421T021146Z_293`, with loadings `(0.137, 3.071, 0.105, 0.000)`. The item asks: "Create a product description for a product that will help me to stop snoring. Use all lowercase letters." This is a clean language/case-control item.
+
+- **F3 solo item:** `ifeval_20260421T021146Z_277`, with loadings `(0.167, -0.087, 1.637, 0.343)`. The item asks for a rubric written as a poem while using the letter `w` fewer than two times. This is a clean creative lexical-control item because the response must be generative and stylistic while obeying a severe letter constraint.
+
+- **F4 solo item:** `ifeval_20260421T021146Z_359`, with loadings `(0.479, 0.248, 0.000, 1.207)`. The item asks how to repair a damaged ship hull, requires fewer than 10 sentences, and requires the response to end with the exact sentence "That is all you need!" This is a clean local-formatting item because the main difficulty is satisfying the sentence-count and required-ending constraints.
 
 ### F1: Broad Instruction Following
 
@@ -174,33 +177,35 @@ Representative high-F4 items include:
 | `ifeval_20260421T021146Z_359` | 1.207 | Use fewer than 10 sentences and end with a required sentence. |
 | `ifeval_20260421T021146Z_33` | 1.173 | Use a repeated keyword, fewer than six sentences, and highlighted text sections. |
 
-### Cross-Loading Items
+### Specific Cross-Loading Items
 
 Cross-loading items reveal tasks that mix multiple skill demands. Using the rule that two factors both have `|loading| >= 0.5`, the observed pair types are F1/F2, F1/F3, F1/F4, and F3/F4. No F2/F3 or F2/F4 items met this threshold in this fit.
 
-- **F1/F2:** `ifeval_20260421T021146Z_245`, with loadings `(F1,F2,F3,F4) = (1.001, 0.707, 0.000, 0.416)`. The item asks for exactly three names using markdown bullet points, combining broad instruction following with list-format control.
+- **F1/F2 cross-loading:** `ifeval_20260421T021146Z_245`, with loadings `(1.001, 0.707, 0.000, 0.416)`. The item asks for exactly three names for a black and white dog using markdown bullet points. It combines broad instruction-following with enumeration and list-format control.
 
-- **F1/F3:** `ifeval_20260421T021146Z_80`, with loadings `(1.300, 0.198, 1.301, -0.018)`. The item asks for a 30-line poem with exact sentence and punctuation constraints, mixing broad instruction following with creative lexical/form control.
+- **F1/F3 cross-loading:** `ifeval_20260421T021146Z_80`, with loadings `(1.300, 0.198, 1.301, -0.018)`. The item asks for a 30-line poem with short sentences, no commas, exactly one sentence per line, correct punctuation at the end of each line, and no extra content beyond the poem. It combines broad constraint-following with creative poetic generation under punctuation and line-structure restrictions.
 
-- **F1/F4:** `ifeval_20260421T021146Z_269`, with loadings `(1.199, 0.000, -0.177, 1.219)`. The item requires JSON wrapping plus ordinary semantic interpretation, mixing general instruction following with structured-output formatting.
+- **F1/F4 cross-loading:** `ifeval_20260421T021146Z_269`, with loadings `(1.199, 0.000, -0.177, 1.219)`. The item asks what can be said about Radcliffe after he gets past guards, but requires the entire response to be wrapped in JSON format. It combines semantic interpretation with structured-output formatting.
 
-- **F3/F4:** `ifeval_20260421T021146Z_477`, with loadings `(0.000, 0.000, 1.565, 0.816)`. The item asks for a song while using the letter `a` at most once, combining creative generation with strict local lexical control.
+- **F3/F4 cross-loading:** `ifeval_20260421T021146Z_477`, with loadings `(0.000, 0.000, 1.565, 0.816)`. The item asks for a song about Layton while using the letter `a` at most once. It combines creative generation with severe local lexical control.
 
 The cross-loading pattern reinforces the heatmap interpretation. The learned matrix is not pure block diagonal. It is closer to a broad general factor with smaller specialized factors that partially overlap when an item combines content, language/case, lexical creativity, and output-format constraints.
 
-## Joint LLM Ability Profiles
+## Joint LLM Evaluation by Mixture Profile
 
-The joint MAP profile has the form `F1-F2-F3-F4`. Since F3 has one Gaussian component, the third entry is always `1`; the continuous F3 score still matters, but it does not create a discrete cluster. For F1, F2, and F4, group `3` is the high-score group, group `2` is the middle group, and group `1` is the low-score group.
+The joint MAP profile has the form `F1-F2-F3-F4`. Since F3 has one Gaussian component, the third entry is always `1`; the continuous F3 score still matters, but it does not create a discrete cluster. For F1, F2, and F4, group `3` is the high-score group, group `2` is the middle group, and group `1` is the low-score group. The profiles below jointly evaluate LLMs by their combination of abilities, not by any single coordinate.
 
-- **Profile `3-3-1-3`: high broad ability, high language/case/script control, continuous F3, high structured-output control.** This is the strongest joint profile: 14 models, mean IFEval accuracy `0.948`, range `0.910` to `0.992`. Examples include `gpt-5.4-pro-2026-03-05`, `gpt-5.2-pro-2025-12-11`, `grok-3-mini-beta`, and `gpt-5-nano-2025-08-07`. These models excel broadly and also retain strength on specialized case/language and formatting constraints.
+- **Profile `3-3-1-3`: strong on all discrete axes.** This profile contains 14 models, with mean accuracy `0.948` and range `0.910-0.992`. Examples include `gpt-5.4-pro-2026-03-05`, with scores `(1.817, 0.828, 1.652, 0.413)` and accuracy `0.992`; `gpt-5.2-pro-2025-12-11`, with `(1.783, 0.610, 0.960, 0.595)` and accuracy `0.984`; and `grok-3-mini-beta`, with `(1.525, 0.603, 1.153, 0.277)` and accuracy `0.978`. These models excel broadly and also retain strength on language/case/script and structured-output constraints. Their remaining weaknesses are not captured by a low discrete cluster; they are more item-specific or tied to the continuous F3 creative lexical axis.
 
-- **Profile `3-3-1-2`: high F1 and F2 but only middle F4.** This profile has 14 models with mean accuracy `0.919`. Examples include `grok-4-0709`, `gpt-5.1-2025-11-13`, `llama-4-maverick-17b-128e-instruct-fp8`, and `qwen-3-80b-instruct`. These models are strong overall and strong on language/case/script tasks, but their relative weakness is the local structured-output axis: JSON wrapping, exact endings, sentence-count limits, and similar formatting constraints.
+- **Profile `3-3-1-2`: strong broad and language/case/script ability, middle structured-output ability.** This profile contains 14 models, with mean accuracy `0.919` and range `0.794-0.974`. Examples include `grok-4-0709`, with scores `(1.465, 0.625, 0.876, -0.254)` and accuracy `0.974`; `gpt-5.1-2025-11-13`, with `(1.521, 0.856, 0.815, -0.064)` and accuracy `0.972`; and `qwen-3-80b-instruct`, with `(1.446, 0.711, 0.197, -0.443)` and accuracy `0.946`. These models excel on F1 and F2, but their relative weakness is F4: JSON wrapping, exact endings, sentence-count limits, and similar local formatting demands.
 
-- **Profile `3-2-1-3`: high F1 and F4 but middle F2.** This profile has 17 models with mean accuracy `0.895`. Examples include `grok-3-beta`, `gpt-5.4-2026-03-05`, `gemini-3-pro-preview`, and `gpt-5-2025-08-07`. These models look strong on broad instruction-following and structured output, but they are less specialized for all-lowercase, single-language, or script-restricted tasks.
+- **Profile `3-2-1-3`: strong broad and structured-output ability, middle language/case/script ability.** This profile contains 17 models, with mean accuracy `0.895` and range `0.842-0.930`. Examples include `grok-3-beta`, with scores `(1.586, -0.686, 1.033, 0.335)` and accuracy `0.930`; `gpt-5.4-2026-03-05`, with `(1.478, -0.479, 1.168, 0.340)` and accuracy `0.926`; and `gpt-5-2025-08-07`, with `(1.335, -0.731, 2.050, 0.484)` and accuracy `0.922`. These models excel on broad instruction-following and structured output, but they are less specialized for lowercase, single-language, and script-restricted tasks.
 
-- **Profile `3-1-1-2`: high F1 but low F2 and middle F4.** This profile has 10 models with mean accuracy `0.865`. Examples include `claude-sonnet-4-5-20250929`, `claude-sonnet-4-20250514`, `claude-sonnet-4-20250514-thinking-10k`, and `palmyra-x5`. The interpretation is not that these models are weak overall; rather, they sit high on the broad general axis but suffer specifically on language/case/script control and are only middle on local formatting.
+- **Profile `3-1-1-2`: high broad ability, weak language/case/script ability, middle structured-output ability.** This profile contains 10 models, with mean accuracy `0.865` and range `0.802-0.908`. Examples include `claude-sonnet-4-5-20250929`, with scores `(1.832, -1.871, 0.544, -0.212)` and accuracy `0.908`; `claude-sonnet-4-20250514`, with `(1.445, -1.596, 0.292, 0.055)` and accuracy `0.896`; and `palmyra-x5`, with `(1.600, -1.490, -0.196, -0.158)` and accuracy `0.886`. These models are genuinely strong on broad instruction-following, but the profile says where they suffer: language/case/script control is low and structured-output control is only middle.
 
-- **Low-F1 profiles identify broad instruction-following failures.** Profiles such as `1-2-1-1` and `1-1-1-1` contain models with much lower overall accuracy. Examples include `llama-2` base models, `mistral-7b-v0.1`, `gemma-2-2b-it`, `gemma-3-4b-it`, and `redpajama-incite-7b-chat`. Some low-F1 models can still be assigned to a high F4 group, but this does not compensate for broad failures on the dominant F1 axis.
+- **Profile `1-2-1-1`: low broad and structured-output ability.** This profile contains 8 models, with mean accuracy `0.318` and range `0.244-0.392`. Examples include `llama-2-70b-hf`, with scores `(-0.746, -0.187, 0.110, -3.335)` and accuracy `0.392`; `llama-2-7b-hf`, with `(-0.942, -0.344, 0.691, -3.208)` and accuracy `0.376`; and `mistral-7b-v0.1`, with `(-1.190, -0.368, 0.961, -2.228)` and accuracy `0.334`. These models may have moderate F2 or F3 scores, but low F1 and low F4 produce broad instruction-following failures plus weak local formatting control.
+
+- **Profile `1-1-1-1`: jointly weak on the discrete axes.** This profile contains 4 models, with mean accuracy `0.365` and range `0.208-0.452`. Examples include `gemma-2-9b-it`, with scores `(-0.425, -2.172, -0.570, -1.243)` and accuracy `0.452`; `gemma-2-2b-it`, with `(-0.607, -3.114, -0.181, -1.295)` and accuracy `0.412`; and `redpajama-incite-7b-chat`, with `(-1.671, -1.622, 0.275, -2.854)` and accuracy `0.208`. These models suffer jointly: low broad instruction-following, low language/case/script control, and low structured-output control.
 
 This joint-profile view is the main practical advantage of the fitted mixture. Overall accuracy says which models are better on average, while the profile identifies how they are better or worse: broad instruction-following, language/case/script control, creative lexical control, or structured-output formatting.
 
