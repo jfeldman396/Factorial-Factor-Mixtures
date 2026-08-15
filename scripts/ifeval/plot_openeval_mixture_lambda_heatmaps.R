@@ -31,8 +31,8 @@ rownames(L) <- d$item_id
 colnames(L) <- paste0("F", seq_len(ncol(L)))
 
 plot_lambda_heatmap <- function(L, main, filename, row_labels = NULL) {
-  png(file.path(out_dir, filename), width = 1200, height = 1800, res = 170)
-  op <- par(mar = c(4, 8, 4, 3))
+  png(file.path(out_dir, filename), width = 1450, height = 1800, res = 170)
+  op <- par(mar = c(4, 8, 4, 7))
   on.exit(par(op), add = TRUE)
   max_abs <- quantile(abs(L), 0.995, na.rm = TRUE)
   pal <- colorRampPalette(c("#355C9A", "#F7F7F7", "#B23A48"))(101)
@@ -84,7 +84,7 @@ strength_tab <- split(seq_along(ord_strength), strongest[ord_strength])
 strength_labels <- do.call(rbind, lapply(names(strength_tab), function(h) {
   idx <- strength_tab[[h]]
   data.frame(
-    label = paste0("strongest F", h),
+    label = paste0("F", h, " strongest"),
     start = min(idx),
     end = max(idx),
     mid = round(mean(range(idx)))

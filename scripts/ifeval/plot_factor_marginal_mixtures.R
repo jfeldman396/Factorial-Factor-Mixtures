@@ -35,7 +35,6 @@ for (h in seq_len(fit$H)) {
   mf <- fit$mixture_fits[[h]]
   cls <- fit$class_map[, h]
   ord <- order(mf$mu)
-  ordered_class <- match(cls, ord)
   pi_ord <- mf$pi[ord]
   mu_ord <- mf$mu[ord]
   var_ord <- mf$var[ord]
@@ -58,13 +57,10 @@ for (h in seq_len(fit$H)) {
     xlab = paste0("F", h, " score"),
     ylab = "density"
   )
-  lines(stats::density(y), col = "#111827", lwd = 2)
-  lines(xg, mix, col = "#111827", lwd = 2, lty = 2)
-
   for (g in seq_along(pi_ord)) {
     lines(xg, comp[, g], col = cols[g], lwd = 2)
     abline(v = mu_ord[g], col = cols[g], lwd = 1.5, lty = 3)
-    yy <- y[ordered_class == g]
+    yy <- y[cls == g]
     if (length(yy) > 0L) {
       rug(yy, col = adjustcolor(cols[g], alpha.f = 0.7), ticksize = 0.045)
     }
@@ -72,9 +68,9 @@ for (h in seq_len(fit$H)) {
 
   legend(
     "topright",
-    legend = c("empirical density", "mixture density", paste0("cluster ", seq_along(pi_ord))),
-    col = c("#111827", "#111827", cols[seq_along(pi_ord)]),
-    lty = c(1, 2, rep(1, length(pi_ord))),
+    legend = paste0("cluster ", seq_along(pi_ord)),
+    col = cols[seq_along(pi_ord)],
+    lty = rep(1, length(pi_ord)),
     lwd = 2,
     bty = "n",
     cex = 0.75
