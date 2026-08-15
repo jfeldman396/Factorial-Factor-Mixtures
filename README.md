@@ -5,7 +5,7 @@ This repository collects the reproducible code, selected results, and writeups f
 The current contents are organized around two analysis tracks:
 
 1. `experiments/sample_size_intercepts_centered`: simulations comparing the proposed binary probit independent-mixture factor method against a correctly specified joint-mixture factor analyzer with probit augmentation and full Gibbs sampling.
-2. `experiments/ifeval`: IFEval rank selection, predictive comparison against ordinary binary probit factor models, tuned sparse loading estimation, and factor interpretation/visualization.
+2. `experiments/ifeval`: IFEval rank and sparsity selection by held-out predictive likelihood, predictive comparison against ordinary binary probit factor models, and factor interpretation/visualization for the selected model.
 
 The main implementation lives in `R/`. Runnable scripts are kept under `scripts/` and source the shared implementation so the simulation and IFEval analyses use the same fitting code.
 
@@ -37,7 +37,7 @@ The IFEval analysis includes:
 - missing-aware rank selection by held-out probit likelihood, held-out BIC, and training BIC
 - ordinary binary probit factor comparison
 - tuned sparse loading penalty for the mixture model
-- selected `H = 3, G = 3` loading interpretation
+- selected-model loading interpretation, including column-specific mixture sizes when selected by CV
 - cross-loading summaries
 - 3D factor visualizations
 - LaTeX writeup and rendered PDF in `writeup/`

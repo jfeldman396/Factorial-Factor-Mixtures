@@ -36,12 +36,24 @@ out_dir <- Sys.getenv(
   "OUT_DIR",
   file.path(bundle_root, "results", "reproduced_openeval_ifeval_H3_G3_interpretation")
 )
+parse_int_vector <- function(x, default) {
+  if (is.na(x) || !nzchar(x)) return(as.integer(default))
+  as.integer(strsplit(gsub("[[:space:]]+", "", x), ",", fixed = TRUE)[[1L]])
+}
+
 H_fixed <- as.integer(Sys.getenv("H_FIXED", "3"))
-G_fixed <- as.integer(Sys.getenv("G_FIXED", "3"))
+G_fixed <- parse_int_vector(Sys.getenv("G_FIXED", "3"), 3L)
+if (!(length(G_fixed) %in% c(1L, H_fixed))) {
+  stop("G_FIXED must be scalar or a comma-separated length-H_FIXED vector.")
+}
+G_label <- paste(G_fixed, collapse = "-")
+G_report <- paste(G_fixed, collapse = ",")
 workers <- as.integer(Sys.getenv("WORKERS", "8"))
 top_n <- as.integer(Sys.getenv("TOP_N", "75"))
 pretrain_loading_penalty <- as.numeric(Sys.getenv("PRETRAIN_LOADING_PENALTY", "0.05"))
 refinement_lambda_l1_penalty <- as.numeric(Sys.getenv("REFINEMENT_LAMBDA_L1_PENALTY", "2"))
+require_mixture_convergence <- toupper(Sys.getenv("REQUIRE_MIXTURE_CONVERGENCE", "FALSE")) %in%
+  c("TRUE", "T", "1", "YES", "Y")
 
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
@@ -268,13 +280,16 @@ plot_top_loading_heatmap <- function(loadings, H, out_dir, top_n = 140L) {
 
 X <- read_binary_matrix(matrix_path)
 model_id <- rownames(X)
+n_aug_iter <- as.integer(Sys.getenv("PRETRAIN_AUG_ITER", "8"))
+n_refine_iter <- as.integer(Sys.getenv("REFINE_ITER", "8"))
+mixture_max_iter <- as.integer(Sys.getenv("MIXTURE_MAX_ITER", "20"))
 
 t0 <- proc.time()[["elapsed"]]
 pre <- fit_binary_probit_pretraining_intercept(
   X = X,
   H = H_fixed,
   G_fixed = G_fixed,
-  n_aug_iter = 8L,
+  n_aug_iter = n_aug_iter,
   z_update = "expectation",
   n_random_starts = 1L,
   max_outer = 4L,
@@ -297,9 +312,10 @@ pre <- fit_binary_probit_pretraining_intercept(
 ref <- fit_binary_probit_refinement_intercept(
   X = X,
   pretrain_fit = pre,
-  n_refine_iter = 8L,
+  n_refine_iter = n_refine_iter,
   maxit_per_subject = 60L,
   n_mix_starts = 3L,
+  mixture_max_iter = mixture_max_iter,
   min_mixture_var = 0.05,
   mixture_update = "map",
   mu_prior_kappa = 0.05,
@@ -311,6 +327,7 @@ ref <- fit_binary_probit_refinement_intercept(
   objective_tolerance = 2e-4,
   objective_tolerance_scale = "relative_total",
   min_refine_iter = 4L,
+  require_mixture_convergence = require_mixture_convergence,
   keep_best_binary_iterate = TRUE,
   parallel = TRUE,
   workers = workers,
@@ -354,7 +371,7 @@ write.csv(load_meta, file.path(out_dir, "openeval_item_intercepts_loadings_metad
 write.csv(summarize_mixture_profiles_ordered(ref), file.path(out_dir, "openeval_factor_mixture_groups.csv"), row.names = FALSE)
 write.csv(ref$pretraining$history, file.path(out_dir, "openeval_pretraining_history.csv"), row.names = FALSE)
 write.csv(ref$joint_refinement$history, file.path(out_dir, "openeval_refinement_history.csv"), row.names = FALSE)
-fit_label <- sprintf("openeval_H%d_G%d", H_fixed, G_fixed)
+fit_label <- sprintf("openeval_H%d_G%s", H_fixed, G_label)
 saveRDS(ref, file.path(out_dir, paste0(fit_label, "_fit.rds")))
 
 factor_rows <- list()
@@ -441,7 +458,7 @@ write.csv(profile_summary, file.path(out_dir, "openeval_profile_summary.csv"), r
 binary_ll <- binary_probit_loglik_alpha(ref$X, ref$F_hat, ref$Lambda_hat, ref$alpha_hat)
 fit_summary <- data.frame(
   H = H_fixed,
-  G = G_fixed,
+  G_config = G_report,
   lambda_l1_penalty = refinement_lambda_l1_penalty,
   n_models = nrow(X),
   n_items = ncol(X),
@@ -458,7 +475,7 @@ plot_factor_scores_heatmap(scores, ref$H, out_dir)
 plot_group_heatmap(scores, ref$H, out_dir)
 plot_top_loading_heatmap(load_meta, ref$H, out_dir)
 
-cat("\nOpenEval H=", H_fixed, ", G=", G_fixed, " fit summary:\n", sep = "")
+cat("\nOpenEval H=", H_fixed, ", G=[", G_report, "] fit summary:\n", sep = "")
 print(fit_summary)
 cat("\nFactor interpretation summary:\n")
 print(factor_summary)

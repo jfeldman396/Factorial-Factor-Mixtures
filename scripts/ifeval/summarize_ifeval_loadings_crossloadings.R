@@ -32,9 +32,11 @@ threshold <- as.numeric(Sys.getenv("LOADING_THRESHOLD", unset = "0.50"))
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
 d <- read.csv(loadings_path, check.names = FALSE, stringsAsFactors = FALSE)
-lambda_cols <- paste0("loading_factor_", 1:3)
+lambda_cols <- grep("^loading_factor_[0-9]+$", names(d), value = TRUE)
+if (!length(lambda_cols)) stop("No loading_factor_* columns found in: ", loadings_path)
 lambda <- as.matrix(d[, lambda_cols, drop = FALSE])
-colnames(lambda) <- paste0("F", 1:3)
+H <- ncol(lambda)
+colnames(lambda) <- paste0("F", seq_len(H))
 
 abs_lambda <- abs(lambda)
 active <- abs_lambda >= threshold
@@ -87,14 +89,14 @@ write.csv(
 )
 
 cross <- all_items[all_items$n_active_factors >= 2L, ]
-write.csv(cross, file.path(out_dir, "ifeval_G3_cross_loading_items.csv"), row.names = FALSE)
+write.csv(cross, file.path(out_dir, sprintf("ifeval_H%d_cross_loading_items.csv", H)), row.names = FALSE)
 
 factor_only <- all_items[all_items$n_active_factors == 1L, ]
-write.csv(factor_only, file.path(out_dir, "ifeval_G3_factor_only_exact_items.csv"), row.names = FALSE)
+write.csv(factor_only, file.path(out_dir, sprintf("ifeval_H%d_factor_only_exact_items.csv", H)), row.names = FALSE)
 
 plot_loading_heatmap <- function(items, filename, title) {
   if (nrow(items) == 0L) return(invisible(NULL))
-  mat <- as.matrix(items[, paste0("F", 1:3), drop = FALSE])
+  mat <- as.matrix(items[, paste0("F", seq_len(H)), drop = FALSE])
   rownames(mat) <- items$item_id
   max_abs <- max(abs(mat), na.rm = TRUE)
   pal <- colorRampPalette(c("#355C9A", "#F7F7F7", "#B23A48"))(101)
@@ -126,12 +128,12 @@ plot_loading_heatmap(
 )
 plot_loading_heatmap(
   cross,
-  "ifeval_G3_cross_loading_items_heatmap.png",
+  sprintf("ifeval_H%d_cross_loading_items_heatmap.png", H),
   paste0("IFEval cross-loading items; |lambda| >= ", threshold)
 )
 
 sparse_plot_items <- sparse_items
-names(sparse_plot_items)[names(sparse_plot_items) %in% paste0("F", 1:3)] <- paste0("F", 1:3)
+names(sparse_plot_items)[names(sparse_plot_items) %in% paste0("F", seq_len(H))] <- paste0("F", seq_len(H))
 plot_loading_heatmap(
   sparse_plot_items,
   sprintf("ifeval_sparse_lambda_threshold_%s_heatmap.png", gsub("[.]", "p", format(threshold, trim = TRUE))),

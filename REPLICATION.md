@@ -55,7 +55,12 @@ The cleaned input files are:
 - `data/ifeval/openeval_item_metadata.csv`;
 - `data/ifeval/openeval_model_metadata.csv`.
 
-The main selected model is the independent-mixture binary probit factor model with `H = 3`, `G = 3`, item intercepts `alpha_j`, and sparse loadings selected by the lambda penalty tuning step.
+The current model-selection analysis fits independent-mixture binary probit
+factor models with item intercepts `alpha_j`, sparse loadings, ranks
+`H = 1,...,5`, and column-specific component counts `G_h`.  The main
+columnwise grid allows `G_h in {1,2,3}` while restricting the model to at most
+one Gaussian coordinate (`G_h = 1`), which matches the ICA-identifiability
+caveat used in the paper discussion.
 
 ### Rank Diagnostics: Singular-Value Shelf And Bai-Ng ICp2
 
@@ -79,7 +84,7 @@ The singular-value shelf is computed from an intercept-only probit augmentation 
 
 ### Refit The Selected Mixture Model
 
-Run:
+For the older fixed `H = 3, G = 3` analysis, run:
 
 ```sh
 MATRIX_PATH=data/ifeval/openeval_ifeval_only_binary_matrix.csv \
@@ -122,6 +127,56 @@ Primary outputs:
 - fitted `.rds` files for each lambda penalty.
 
 The committed selected analysis used lambda penalty `10`.
+
+### Tune Rank, Column-Specific G, And Sparse Loading Penalty By Held-Out Likelihood
+
+The current IFEval tuning run randomly holds out model-by-item cells and scores
+held-out predictive log likelihood.  Held-out cells are excluded from probit
+augmentation, loading updates, factor-score updates, and mixture updates.
+
+Run:
+
+```sh
+OUT_DIR=results/full/ifeval_columnwise_G_cv_atmost1_gaussian \
+H_GRID=1:5 \
+G_MODE=column_grid \
+G_GRID=1,2,3 \
+G_COMPONENT_VALUES=1,2,3 \
+MAX_GAUSSIAN_COORDS=1 \
+LAMBDA_L1_GRID=0,1,2,4,8,12 \
+METHODS=mixture,ordinary \
+K_FOLDS=3 \
+WORKERS=6 \
+PRETRAIN_AUG_ITER=20 \
+REFINE_ITER=20 \
+MIXTURE_MAX_ITER=200 \
+FIT_SELECTED_AFTER_CV=TRUE \
+SAVE_FITS=FALSE \
+RESUME_EXISTING=TRUE \
+REFRESH_PLOTS=FALSE \
+Rscript scripts/ifeval/cv_ifeval_rank_lambda_models.R
+```
+
+Primary outputs:
+
+- `ifeval_rank_lambda_cv_fold_scores.csv`;
+- `ifeval_rank_lambda_cv_histories.csv`;
+- `ifeval_rank_lambda_cv_summary.csv`;
+- `ifeval_rank_lambda_selected_by_heldout_ll.csv`;
+- selected-model refit folders for the best mixture and ordinary probit models.
+
+After the grid finishes, regenerate the rank/lambda summary plots without
+refitting by rerunning the same command with:
+
+```sh
+FIT_SELECTED_AFTER_CV=FALSE REFRESH_PLOTS=TRUE
+```
+
+This produces:
+
+- `rank_lambda_top_candidates_by_heldout_ll.csv`;
+- `rank_lambda_top_candidates_by_heldout_ll.png`;
+- line plots when the plotted candidate set is small enough to facet cleanly.
 
 ### Fit Ordinary Binary Probit Comparator
 
@@ -278,6 +333,20 @@ These settings are recorded in:
 configs/sample_size_intercepts_centered.env
 ```
 
+The unbalanced-block extension uses the same `H`, `G`, `n`, `p`, repetitions,
+loading designs, intercepts, and MAP/Gibbs settings, but changes
+`BLOCK_SIZE_MODE` to `moderate_ifeval_like`.  Its launcher is:
+
+```sh
+Rscript scripts/sample_size/run_ifeval_blocksize_crossloading_sample_size_MAP_intercepts.R
+```
+
+By default, outputs go to:
+
+```text
+results/full/moderate_ifeval_blocksize_crossloading_joint_mfa_sample_size_p500_25reps_H3H4_G2G3_MAP_intercepts_centered
+```
+
 ### Run The Full Simulation
 
 Run:
@@ -413,6 +482,10 @@ cp "$OUT_DIR"/dgp_lambda_matrix_*.csv results/selected_tables/sample_size/
 cp "$OUT_DIR"/checkpoint_parameter_recovery_summary.csv results/selected_tables/sample_size/
 cp "$OUT_DIR"/checkpoint_timing_log_seconds_summary.csv results/selected_tables/sample_size/
 ```
+
+For the unbalanced-block simulation, use the unbalanced output directory above
+and copy the files with an `unbalanced_blocks_` prefix when preparing selected
+paper-facing snapshots.
 
 ### Interpret Simulation Metrics
 

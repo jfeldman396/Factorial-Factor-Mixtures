@@ -487,7 +487,10 @@ fit_binary_probit_pretraining_intercept <- function(
 
     svd_out <- svd_scores_from_Z(Z, H = H, center_Z = TRUE)
     S <- svd_out$S
-    G_iter <- rep(as.integer(G_fixed), H)
+    G_iter <- if (length(G_fixed) == 1L) rep(as.integer(G_fixed), H) else as.integer(G_fixed)
+    if (length(G_iter) != H) {
+      stop("G_fixed must be scalar or a length-H component-count vector.")
+    }
 
     rotation_out <- estimate_mixture_ica_unknown_G(
       S = S,
@@ -817,12 +820,14 @@ fit_binary_probit_refinement_intercept <- function(
     objective_tolerance = 2e-4,
     objective_tolerance_scale = c("relative_total", "per_response"),
     min_refine_iter = 4L,
+    require_mixture_convergence = FALSE,
     keep_best_binary_iterate = TRUE,
     parallel = FALSE,
     workers = NULL,
     verbose = TRUE) {
   mixture_update <- match.arg(mixture_update)
   objective_tolerance_scale <- match.arg(objective_tolerance_scale)
+  require_mixture_convergence <- isTRUE(require_mixture_convergence)
   workers <- resolve_workers(workers)
   X <- as.matrix(X)
 
@@ -862,6 +867,7 @@ fit_binary_probit_refinement_intercept <- function(
     stopping_change = NA_real_,
     stopping_scale = objective_tolerance_scale,
     G_hat = paste(vapply(mixture_fits, function(z) length(z$pi), integer(1)), collapse = ","),
+    all_mixtures_converged = all(vapply(mixture_fits, function(z) isTRUE(z$converged), logical(1))),
     converged = FALSE
   )
   trace[[1L]] <- list(
@@ -929,6 +935,7 @@ fit_binary_probit_refinement_intercept <- function(
       parallel = parallel,
       workers = workers
     )
+    all_mixtures_converged <- all(vapply(mixture_fits, function(z) isTRUE(z$converged), logical(1)))
 
     current_binary <- binary_probit_loglik_alpha(X, F_hat, Lambda, alpha)
     current_mixture <- mixture_prior_loglik(F_hat, mixture_fits)
@@ -954,6 +961,7 @@ fit_binary_probit_refinement_intercept <- function(
       stopping_change = stopping_change,
       stopping_scale = objective_tolerance_scale,
       G_hat = paste(vapply(mixture_fits, function(z) length(z$pi), integer(1)), collapse = ","),
+      all_mixtures_converged = all_mixtures_converged,
       converged = FALSE
     )
     trace[[iter + 1L]] <- list(
@@ -970,7 +978,8 @@ fit_binary_probit_refinement_intercept <- function(
         "  binary loglik = ", round(current_binary, 2),
         "; per response = ", round(current_binary / length(X), 5),
         "; mixture loglik = ", round(current_mixture, 2),
-        "; stopping change = ", signif(stopping_change, 3)
+        "; stopping change = ", signif(stopping_change, 3),
+        "; all mixtures converged = ", all_mixtures_converged
       )
     }
 
@@ -978,7 +987,8 @@ fit_binary_probit_refinement_intercept <- function(
         is.finite(objective_tolerance) &&
         iter >= min_refine_iter &&
         is.finite(stopping_change) &&
-        stopping_change <= objective_tolerance) {
+        stopping_change <= objective_tolerance &&
+        (!require_mixture_convergence || isTRUE(all_mixtures_converged))) {
       converged <- TRUE
       history[[iter + 1L]]$converged <- TRUE
       if (verbose) message("Stopping refinement by binary loglik tolerance.")
@@ -988,7 +998,12 @@ fit_binary_probit_refinement_intercept <- function(
 
   history_out <- do.call(rbind, history[!vapply(history, is.null, logical(1))])
   trace_out <- trace[!vapply(trace, is.null, logical(1))]
-  best_trace_index <- which.max(history_out$binary_loglik)
+  best_candidates <- seq_len(nrow(history_out))
+  if (require_mixture_convergence && "all_mixtures_converged" %in% names(history_out)) {
+    converged_candidates <- which(history_out$all_mixtures_converged %in% TRUE)
+    if (length(converged_candidates) > 0L) best_candidates <- converged_candidates
+  }
+  best_trace_index <- best_candidates[which.max(history_out$binary_loglik[best_candidates])]
   best_iteration <- history_out$iteration[best_trace_index]
 
   if (isTRUE(keep_best_binary_iterate) && length(trace_out) >= best_trace_index) {
@@ -1023,6 +1038,7 @@ fit_binary_probit_refinement_intercept <- function(
     objective_tolerance = objective_tolerance,
     objective_tolerance_scale = objective_tolerance_scale,
     min_refine_iter = min_refine_iter,
+    require_mixture_convergence = require_mixture_convergence,
     keep_best_binary_iterate = keep_best_binary_iterate,
     selected_iteration = best_iteration,
     selected_binary_loglik = history_out$binary_loglik[best_trace_index],

@@ -24,10 +24,11 @@ load_path <- Sys.getenv(
 out_dir <- Sys.getenv("OUT_DIR", unset = fit_dir)
 
 d <- read.csv(load_path, check.names = FALSE, stringsAsFactors = FALSE)
-lambda_cols <- paste0("loading_factor_", 1:3)
+lambda_cols <- grep("^loading_factor_[0-9]+$", names(d), value = TRUE)
+if (!length(lambda_cols)) stop("No loading_factor_* columns found in: ", load_path)
 L <- as.matrix(d[, lambda_cols])
 rownames(L) <- d$item_id
-colnames(L) <- paste0("F", 1:3)
+colnames(L) <- paste0("F", seq_len(ncol(L)))
 
 plot_lambda_heatmap <- function(L, main, filename, row_labels = NULL) {
   png(file.path(out_dir, filename), width = 1200, height = 1800, res = 170)

@@ -1,7 +1,8 @@
 #!/usr/bin/env Rscript
 
-# OpenEval ordinary binary probit H=3 factor summary and comparison to the
-# selected independent-mixture H=3, G=3 fit.
+# OpenEval ordinary binary probit factor summary and comparison to the selected
+# independent-mixture probit fit.  The script detects the fitted rank from the
+# saved factor-score columns, so it works for H=3, H=4, or another selected H.
 
 options(stringsAsFactors = FALSE)
 
@@ -32,21 +33,40 @@ dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
 ordinary <- read.csv(file.path(ordinary_dir, "ordinary_probit_factor_scores.csv"), check.names = FALSE)
 names(ordinary)[1L] <- "model_id"
-names(ordinary)[3:5] <- paste0("ordinary_F", 1:3)
+ordinary_factor_cols <- grep("^factor_[0-9]+$", names(ordinary), value = TRUE)
+if (!length(ordinary_factor_cols)) {
+  ordinary_factor_cols <- grep("^[0-9]+$", names(ordinary), value = TRUE)
+}
+if (!length(ordinary_factor_cols)) {
+  stop("No ordinary factor-score columns found in: ", ordinary_dir)
+}
+H_ordinary <- length(ordinary_factor_cols)
+names(ordinary)[match(ordinary_factor_cols, names(ordinary))] <- paste0("ordinary_F", seq_len(H_ordinary))
 
 mixture <- read.csv(file.path(mixture_dir, "openeval_model_factor_scores_profiles.csv"), check.names = FALSE)
-mixture <- mixture[, c("model_id", "accuracy", paste0("factor_", 1:3), paste0("group_factor_", 1:3), "profile_id")]
-names(mixture)[3:5] <- paste0("mixture_F", 1:3)
+mixture_factor_cols <- grep("^factor_[0-9]+$", names(mixture), value = TRUE)
+mixture_group_cols <- grep("^group_factor_[0-9]+$", names(mixture), value = TRUE)
+H_mixture <- length(mixture_factor_cols)
+H_compare <- min(H_ordinary, H_mixture)
+if (H_compare < 1L) stop("No common factor dimensions found.")
+mixture <- mixture[, c(
+  "model_id",
+  "accuracy",
+  mixture_factor_cols,
+  mixture_group_cols,
+  "profile_id"
+)]
+names(mixture)[match(mixture_factor_cols, names(mixture))] <- paste0("mixture_F", seq_len(H_mixture))
 
 dat <- merge(ordinary, mixture, by = c("model_id", "accuracy"), all = FALSE)
 dat <- dat[order(dat$accuracy, decreasing = TRUE), ]
 write.csv(dat, file.path(out_dir, "openeval_ordinary_and_mixture_factor_scores.csv"), row.names = FALSE)
 
-ordinary_mat <- as.matrix(dat[, paste0("ordinary_F", 1:3)])
-mixture_mat <- as.matrix(dat[, paste0("mixture_F", 1:3)])
+ordinary_mat <- as.matrix(dat[, paste0("ordinary_F", seq_len(H_compare)), drop = FALSE])
+mixture_mat <- as.matrix(dat[, paste0("mixture_F", seq_len(H_compare)), drop = FALSE])
 
 acc_cor <- data.frame(
-  factor = paste0("ordinary_F", 1:3),
+  factor = paste0("ordinary_F", seq_len(H_compare)),
   cor_with_accuracy = as.numeric(cor(ordinary_mat, dat$accuracy))
 )
 write.csv(acc_cor, file.path(out_dir, "ordinary_factor_accuracy_correlations.csv"), row.names = FALSE)
@@ -54,12 +74,12 @@ write.csv(acc_cor, file.path(out_dir, "ordinary_factor_accuracy_correlations.csv
 factor_cor <- cor(ordinary_mat, mixture_mat)
 write.csv(factor_cor, file.path(out_dir, "ordinary_mixture_factor_correlation_matrix.csv"))
 
-png(file.path(out_dir, "ordinary_probit_pairwise_factor_scatter.png"), width = 1900, height = 650, res = 160)
-op <- par(mfrow = c(1, 3), mar = c(5, 5, 3, 1))
+plot_pairs <- combn(seq_len(H_compare), 2L, simplify = FALSE)
+png(file.path(out_dir, "ordinary_probit_pairwise_factor_scatter.png"), width = 1900, height = 1250, res = 160)
+op <- par(mfrow = c(ceiling(length(plot_pairs) / 3), 3), mar = c(5, 5, 3, 1))
 pal <- colorRampPalette(c("#355C9A", "#F2C14E", "#B23A48"))(100)
 idx <- pmax(1, pmin(100, as.integer(cut(dat$accuracy, breaks = 100, labels = FALSE))))
-pairs_to_plot <- list(c(1, 2), c(1, 3), c(2, 3))
-for (pair in pairs_to_plot) {
+for (pair in plot_pairs) {
   x <- ordinary_mat[, pair[1]]
   y <- ordinary_mat[, pair[2]]
   plot(
@@ -79,7 +99,7 @@ png(file.path(out_dir, "ordinary_factor_scores_by_llm_heatmap.png"), width = 320
 op <- par(mar = c(12, 5, 4, 2))
 mat <- t(ordinary_mat)
 colnames(mat) <- dat$model_id
-rownames(mat) <- paste0("F", 1:3)
+rownames(mat) <- paste0("F", seq_len(H_compare))
 max_abs <- max(abs(mat), na.rm = TRUE)
 pal2 <- colorRampPalette(c("#355C9A", "#F7F7F7", "#B23A48"))(101)
 image(
@@ -93,7 +113,7 @@ image(
   ylab = "ordinary probit factor",
   main = "Ordinary probit factor scores by LLM, ordered by accuracy"
 )
-axis(2, at = seq_len(3), labels = rownames(mat), las = 1)
+axis(2, at = seq_len(H_compare), labels = rownames(mat), las = 1)
 axis(1, at = seq_len(ncol(mat)), labels = colnames(mat), las = 2, cex.axis = 0.28, tick = FALSE)
 box()
 par(op)
@@ -103,8 +123,8 @@ png(file.path(out_dir, "ordinary_vs_mixture_factor_correlation_heatmap.png"), wi
 op <- par(mar = c(5, 5, 4, 2))
 pal3 <- colorRampPalette(c("#355C9A", "#F7F7F7", "#B23A48"))(101)
 image(
-  seq_len(3),
-  seq_len(3),
+  seq_len(H_compare),
+  seq_len(H_compare),
   t(factor_cor),
   col = pal3,
   breaks = seq(-1, 1, length.out = 102),
@@ -113,10 +133,10 @@ image(
   ylab = "mixture factor",
   main = "Correlation: ordinary vs mixture factors"
 )
-axis(1, at = seq_len(3), labels = paste0("Ord F", 1:3))
-axis(2, at = seq_len(3), labels = paste0("Mix F", 1:3), las = 1)
-for (i in 1:3) {
-  for (j in 1:3) {
+axis(1, at = seq_len(H_compare), labels = paste0("Ord F", seq_len(H_compare)))
+axis(2, at = seq_len(H_compare), labels = paste0("Mix F", seq_len(H_compare)), las = 1)
+for (i in seq_len(H_compare)) {
+  for (j in seq_len(H_compare)) {
     text(i, j, labels = sprintf("%.2f", factor_cor[i, j]), cex = 1.2)
   }
 }
@@ -129,7 +149,7 @@ print(acc_cor)
 cat("\nOrdinary vs mixture factor correlation matrix:\n")
 print(round(factor_cor, 3))
 cat("\nTop and bottom models by accuracy with ordinary factors:\n")
-print(head(dat[, c("model_id", "accuracy", paste0("ordinary_F", 1:3))], 12), row.names = FALSE)
+print(head(dat[, c("model_id", "accuracy", paste0("ordinary_F", seq_len(H_compare)))], 12), row.names = FALSE)
 cat("\n")
-print(tail(dat[, c("model_id", "accuracy", paste0("ordinary_F", 1:3))], 12), row.names = FALSE)
+print(tail(dat[, c("model_id", "accuracy", paste0("ordinary_F", seq_len(H_compare)))], 12), row.names = FALSE)
 cat("\nOutputs saved in: ", normalizePath(out_dir), "\n", sep = "")
