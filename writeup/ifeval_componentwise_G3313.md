@@ -159,7 +159,17 @@ Some items load substantially on more than one factor. These are important becau
 
 - `ifeval_20260421T021146Z_343`: F1/F3 cross-loading, with loadings `(1.235, 0.068, 1.016, 0.194)`. This is a comma-avoidance task, where the response must satisfy both content and lexical-control constraints.
 
-These cross-loadings are also visible in the heatmap: many F2-F4-primary rows retain moderate F1 loadings, and many F1-primary rows show secondary structure in F3 or F4. This is why the matrix is not a pure block diagonal matrix. It is closer to a broad general factor with smaller partially overlapping specialized factors.
+F2 also has cross-loading items, although they are less common than F1/F3 and F1/F4 cross-loaders. Using the rule `|F2| >= 0.5` and at least one other `|loading| >= 0.5`, there are 9 F2 cross-loading items. These are mostly F1/F2 items:
+
+- `ifeval_20260421T021146Z_348`: F1/F2 cross-loading, with loadings `(0.512, 2.754, 0.000, 0.000)`. This asks for a weird startup pitch poem in English with no capital letters, combining broad creative instruction following with lowercase/case control.
+
+- `ifeval_20260421T021146Z_495`: F1/F2 cross-loading, with loadings `(0.573, 1.713, 0.031, 0.498)`. This asks for a book review as a conversation in Urdu only, mixing content/form generation with single-language control.
+
+- `ifeval_20260421T021146Z_487`: F1/F2 cross-loading, with loadings `(0.536, 1.050, 0.118, 0.014)`. This asks for a lower-case English tweet storm of 20 to 30 sentences, combining length/content control with case control.
+
+- `ifeval_20260421T021146Z_202`: F1/F2 cross-loading, with loadings `(1.456, 0.634, -0.230, 0.191)`. This asks for a weird lowercase answer with exactly three markdown bullet points, so it mixes broad instruction following, lowercase control, and some formatting.
+
+These cross-loadings are also visible in the heatmap: many F2-F4-primary rows retain moderate F1 loadings, and many F1-primary rows show secondary structure in F2, F3, or F4. This is why the matrix is not a pure block diagonal matrix. It is closer to a broad general factor with smaller partially overlapping specialized factors.
 
 ## Working Interpretation
 
