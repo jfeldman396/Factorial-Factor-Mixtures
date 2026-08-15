@@ -9,7 +9,9 @@ The current contents are organized around two analysis tracks:
 
 The main implementation lives in `R/`. Runnable scripts are kept under `scripts/` and source the shared implementation so the simulation and IFEval analyses use the same fitting code.
 
-See `REPLICATION.md` for step-by-step instructions to rerun the IFEval analysis and the sample-size simulation.
+See `REPLICATION.md` for step-by-step instructions to rerun the IFEval
+analysis and the sample-size simulation. See `CODE_AUDIT.md` for the latest
+static audit notes and reproducibility caveats.
 
 ## Current Simulation
 
@@ -41,6 +43,11 @@ The IFEval analysis includes:
 - cross-loading summaries
 - 3D factor visualizations
 - LaTeX writeup and rendered PDF in `writeup/`
+
+The current compact component-wise IFEval writeup is
+`writeup/ifeval_componentwise_G3313.pdf`. It summarizes the `H = 4`,
+`G = (3,3,1,3)` fit, representative cross-loading items, LLM ability profiles,
+the loading heatmap, marginal mixture fits, and factor-score visualizations.
 
 The cleaned IFEval data used by the scripts live in `data/ifeval`.
 

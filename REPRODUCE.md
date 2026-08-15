@@ -54,6 +54,30 @@ The major steps are:
 
 Selected generated tables and plots are stored under `results/selected_tables/ifeval` and `results/selected_plots/ifeval`.
 
+The current component-wise interpretation reported in the writeup uses
+`H = 4`, `G = (3,3,1,3)`, and sparse-loading MAP refinement with
+`lambda_l1_penalty = 4`. To reproduce that selected fit directly:
+
+```sh
+MATRIX_PATH=data/ifeval/openeval_ifeval_only_binary_matrix.csv \
+ITEM_METADATA_PATH=data/ifeval/openeval_item_metadata.csv \
+OUT_DIR=results/full/ifeval/reproduced_componentwise_H4_G3313_lambda4 \
+H_FIXED=4 \
+G_FIXED=3,3,1,3 \
+WORKERS=8 \
+PRETRAIN_AUG_ITER=20 \
+REFINE_ITER=20 \
+MIXTURE_MAX_ITER=200 \
+REQUIRE_MIXTURE_CONVERGENCE=TRUE \
+REFINEMENT_LAMBDA_L1_PENALTY=4 \
+Rscript scripts/ifeval/fit_interpret_ifeval_H3_G3.R
+```
+
+The compact writeup for this fit is `writeup/ifeval_componentwise_G3313.pdf`.
+
 ## Notes For Audit
 
-The scripts are intentionally close to the working analysis versions. The next code-review pass should split data generation, fitting, alignment, metrics, and plotting into smaller functions with unit tests. See `FUNCTION_MAP.md` for the current function inventory.
+The scripts are intentionally close to the working analysis versions. The next
+code-review pass should split data generation, fitting, alignment, metrics, and
+plotting into smaller functions with unit tests. See `FUNCTION_MAP.md` for the
+current function inventory and `CODE_AUDIT.md` for the latest static audit.

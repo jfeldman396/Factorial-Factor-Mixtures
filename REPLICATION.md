@@ -43,7 +43,8 @@ Important paths:
 - `configs/sample_size_intercepts_centered.env`: the main simulation grid/settings.
 - `results/selected_tables/`: selected CSV outputs committed for review.
 - `results/selected_plots/`: selected figures committed for review.
-- `writeup/`: IFEval LaTeX source and rendered PDF.
+- `writeup/`: IFEval writeups and rendered PDFs.
+- `CODE_AUDIT.md`: current static audit notes, parse checks, and caveats.
 
 Full regenerated outputs should be written under `results/full/`, which is ignored by git.
 
@@ -83,6 +84,51 @@ This produces:
 The singular-value shelf is computed from an intercept-only probit augmentation of the binary matrix. The same output reports the Bai-Ng `ICp2` plug-in criterion for comparison.
 
 ### Refit The Selected Mixture Model
+
+The current component-wise IFEval interpretation uses:
+
+- `H = 4`;
+- `G = (3,3,1,3)`, so the third coordinate is Gaussian;
+- sparse-loading MAP refinement with `lambda_l1_penalty = 4`;
+- `20` maximum pretraining iterations and `20` maximum refinement iterations.
+
+Run:
+
+```sh
+MATRIX_PATH=data/ifeval/openeval_ifeval_only_binary_matrix.csv \
+ITEM_METADATA_PATH=data/ifeval/openeval_item_metadata.csv \
+OUT_DIR=results/full/ifeval/reproduced_componentwise_H4_G3313_lambda4 \
+H_FIXED=4 \
+G_FIXED=3,3,1,3 \
+WORKERS=8 \
+PRETRAIN_AUG_ITER=20 \
+REFINE_ITER=20 \
+MIXTURE_MAX_ITER=200 \
+REQUIRE_MIXTURE_CONVERGENCE=TRUE \
+REFINEMENT_LAMBDA_L1_PENALTY=4 \
+Rscript scripts/ifeval/fit_interpret_ifeval_H3_G3.R
+```
+
+Despite the historical filename, `fit_interpret_ifeval_H3_G3.R` accepts
+arbitrary `H_FIXED` and either scalar or comma-separated vector `G_FIXED`.
+
+Primary outputs:
+
+- `openeval_item_intercepts_loadings_metadata.csv`;
+- `openeval_model_factor_scores_profiles.csv`;
+- `openeval_factor_interpretation_summary.csv`;
+- `openeval_top_loading_item_examples.csv`;
+- `openeval_factor_mixture_groups.csv`;
+- loading, marginal-mixture, factor-score, and profile plots.
+
+The rendered component-wise writeup is:
+
+```text
+writeup/ifeval_componentwise_G3313.pdf
+```
+
+It summarizes the selected fit, compact cross-loading examples, and LLM
+ability profiles by factor.
 
 For the older fixed `H = 3, G = 3` analysis, run:
 
@@ -511,7 +557,12 @@ Selected outputs from prior runs are committed for immediate inspection:
 - sample-size tables: `results/selected_tables/sample_size`;
 - IFEval plots: `results/selected_plots/ifeval`;
 - IFEval tables: `results/selected_tables/ifeval`;
-- IFEval writeup: `writeup/ifeval_analysis_writeup.pdf`.
+- IFEval writeups: `writeup/ifeval_analysis_writeup.pdf` and
+  `writeup/ifeval_componentwise_G3313.pdf`.
+
+The latest static audit notes are in `CODE_AUDIT.md`. They record which R files
+were parsed, which input files were checked, which PDF was rendered, and which
+caveats remain before claiming a full fresh end-to-end rerun.
 
 These selected outputs are snapshots. Full reruns should write to `results/full/`.
 

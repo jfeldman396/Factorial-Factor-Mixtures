@@ -54,6 +54,18 @@ The group heatmap translates the continuous scores into factor-wise MAP mixture 
 
 ![MAP mixture groups by LLM](ifeval_componentwise_G3313_assets/llm_mixture_groups_G3313_cropped.png)
 
+### LLM Ability Profiles
+
+The fitted coordinates give a more nuanced model profile than overall accuracy alone.
+
+- **F1: broad instruction-following ability.** High F1 models include `claude-sonnet-4-5-20250929`, `llama-4-scout-17b-16e-instruct`, `gpt-5.4-pro-2026-03-05`, and `gpt-5.2-pro-2025-12-11`. Low F1 models include small or older chat/instruct models such as `qwen-1.5-0.5b-chat`, `falcon-7b-instruct`, and `redpajama-incite` variants. This is the closest coordinate to a broad IFEval ability axis.
+
+- **F2: language, case, and script-control ability.** High F2 models include `qwen-2.5-32b-instruct`, `granite-4.0-micro`, `gpt-4.1-nano-2025-04-14`, `gpt-5.1-2025-11-13`, and `gpt-4o-2024-08-06`. Low F2 models include `gemma-3-1b-it`, `gemma-3-4b-it`, and `gemma-2-2b-it`. This axis separates models on lowercasing, single-language output, and script-control constraints.
+
+- **F3: continuous creative lexical-control ability.** High F3 models include `gpt-5-2025-08-07`, `gpt-5.4-pro-2026-03-05`, `gpt-5-nano-2025-08-07`, `gpt-5-mini-2025-08-07`, and `o3-2025-04-16`. Low F3 models include several Qwen and Mistral-family entries such as `qwen-1.5-32b-chat`, `qwen-2.5-0.5b-instruct`, and `mistral-7b-instruct-v0.3`. Because F3 is modeled with one Gaussian component, these are high/low positions on a continuous axis rather than discrete subtypes.
+
+- **F4: structured-output and local-formatting ability.** High F4 models include `nova-pro-v1:0`, `claude-3-5-sonnet-20241022`, `gemini-1.5-flash-002`, `qwen-2.5-14b-instruct`, and `gpt-5-nano-2025-08-07`. Low F4 models include `llama-2` base models, `gemma-3-12b-it`, `redpajama-incite-7b-chat`, and `qwen-1.5-32b-chat`. This coordinate appears to capture JSON wrapping, exact endings, sentence-count limits, and similar formatting demands.
+
 ## Loading Matrix
 
 ![Lambda ordered by strongest factor](ifeval_componentwise_G3313_assets/lambda_ordered_by_strongest_factor_G3313.png)
@@ -145,31 +157,17 @@ Representative high-F4 items include:
 
 ### Cross-Loading Items
 
-Some items load substantially on more than one factor. These are important because they reveal tasks that mix multiple skill demands. The table below lists examples with at least two loadings above about 0.5 in absolute value.
+Cross-loading items reveal tasks that mix multiple skill demands. Using the rule that two factors both have `|loading| >= 0.5`, the observed pair types are F1/F2, F1/F3, F1/F4, and F3/F4. No F2/F3 or F2/F4 items met this threshold in this fit.
 
-- `ifeval_20260421T021146Z_80`: F1/F3 cross-loading, with loadings `(F1,F2,F3,F4) = (1.300, 0.198, 1.301, -0.018)`. This item asks for a 30-line poem with exact sentence and punctuation constraints, mixing broad instruction following with creative lexical/form control.
+- **F1/F2:** `ifeval_20260421T021146Z_245`, with loadings `(F1,F2,F3,F4) = (1.001, 0.707, 0.000, 0.416)`. The item asks for exactly three names using markdown bullet points, combining broad instruction following with list-format control.
 
-- `ifeval_20260421T021146Z_269`: F1/F4 cross-loading, with loadings `(1.199, 0.000, -0.177, 1.219)`. This item requires JSON wrapping plus ordinary semantic interpretation, mixing general instruction following with structured-output formatting.
+- **F1/F3:** `ifeval_20260421T021146Z_80`, with loadings `(1.300, 0.198, 1.301, -0.018)`. The item asks for a 30-line poem with exact sentence and punctuation constraints, mixing broad instruction following with creative lexical/form control.
 
-- `ifeval_20260421T021146Z_502`: F1/F3 cross-loading, with loadings `(1.230, 0.000, 1.177, 0.290)`. This item asks for a riddle without commas, combining creative generation with punctuation restriction.
+- **F1/F4:** `ifeval_20260421T021146Z_269`, with loadings `(1.199, 0.000, -0.177, 1.219)`. The item requires JSON wrapping plus ordinary semantic interpretation, mixing general instruction following with structured-output formatting.
 
-- `ifeval_20260421T021146Z_233`: F1/F4 cross-loading, with loadings `(1.507, 0.000, 0.000, 1.151)`. This item asks the model to explain a technical concept for a casual audience and end with an exact required phrase.
+- **F3/F4:** `ifeval_20260421T021146Z_477`, with loadings `(0.000, 0.000, 1.565, 0.816)`. The item asks for a song while using the letter `a` at most once, combining creative generation with strict local lexical control.
 
-- `ifeval_20260421T021146Z_58`: F1/F4 cross-loading, with loadings `(1.027, 0.089, -0.136, 1.213)`. This item asks for a history answer wrapped in JSON, again mixing content generation with rigid structured output.
-
-- `ifeval_20260421T021146Z_343`: F1/F3 cross-loading, with loadings `(1.235, 0.068, 1.016, 0.194)`. This is a comma-avoidance task, where the response must satisfy both content and lexical-control constraints.
-
-F2 also has cross-loading items, although they are less common than F1/F3 and F1/F4 cross-loaders. Using the rule `|F2| >= 0.5` and at least one other `|loading| >= 0.5`, there are 9 F2 cross-loading items. These are mostly F1/F2 items:
-
-- `ifeval_20260421T021146Z_348`: F1/F2 cross-loading, with loadings `(0.512, 2.754, 0.000, 0.000)`. This asks for a weird startup pitch poem in English with no capital letters, combining broad creative instruction following with lowercase/case control.
-
-- `ifeval_20260421T021146Z_495`: F1/F2 cross-loading, with loadings `(0.573, 1.713, 0.031, 0.498)`. This asks for a book review as a conversation in Urdu only, mixing content/form generation with single-language control.
-
-- `ifeval_20260421T021146Z_487`: F1/F2 cross-loading, with loadings `(0.536, 1.050, 0.118, 0.014)`. This asks for a lower-case English tweet storm of 20 to 30 sentences, combining length/content control with case control.
-
-- `ifeval_20260421T021146Z_202`: F1/F2 cross-loading, with loadings `(1.456, 0.634, -0.230, 0.191)`. This asks for a weird lowercase answer with exactly three markdown bullet points, so it mixes broad instruction following, lowercase control, and some formatting.
-
-These cross-loadings are also visible in the heatmap: many F2-F4-primary rows retain moderate F1 loadings, and many F1-primary rows show secondary structure in F2, F3, or F4. This is why the matrix is not a pure block diagonal matrix. It is closer to a broad general factor with smaller partially overlapping specialized factors.
+The cross-loading pattern reinforces the heatmap interpretation. The learned matrix is not pure block diagonal. It is closer to a broad general factor with smaller specialized factors that partially overlap when an item combines content, language/case, lexical creativity, and output-format constraints.
 
 ## Working Interpretation
 
