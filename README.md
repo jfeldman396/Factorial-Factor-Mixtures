@@ -34,7 +34,6 @@ Selected checkpoint plots and tables are stored in `results/selected_plots/sampl
 
 The IFEval analysis includes:
 
-- singular-value shelf diagnostics for the augmented probit matrix
 - missing-aware rank/component/penalty selection by held-out predictive likelihood
 - tuned sparse loading penalty for the mixture model
 - selected-model loading interpretation, including column-specific mixture sizes when selected by CV

@@ -20,7 +20,6 @@ Scope checked:
   - `scripts/sample_size/plot_sample_size_rmse_panels.R`.
 - Smoke-tested the cleaned IFEval CV script with a tiny `H=1, G=1` two-fold run.
 - Smoke-tested the cleaned selected-fit script with a tiny `H=1, G=1` run.
-- Smoke-tested the singular-value shelf diagnostic with `H_MAX=3`.
 - Checked `scripts/ifeval/run_full_analysis.sh` with `zsh -n`.
 - Re-rendered the component-wise IFEval writeup PDF:
   - `writeup/ifeval_componentwise_G3313.pdf`.
@@ -40,7 +39,7 @@ Rscript -e 'files <- c(Sys.glob("R/*.R"), Sys.glob("scripts/*/*.R")); bad <- cha
 Result:
 
 ```text
-Parsed 18 R files; failures 0
+Parsed 17 R files; failures 0
 ```
 
 ## Remaining Audit Caveats

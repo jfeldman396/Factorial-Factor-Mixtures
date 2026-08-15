@@ -45,12 +45,11 @@ bash scripts/ifeval/run_full_analysis.sh
 
 The major steps are:
 
-1. Singular-value shelf diagnostic.
-2. Held-out predictive likelihood tuning over rank, component-wise `G`, and sparse loading penalty.
-3. Selected mixture model refit with MAP refinement.
-4. Loading/cross-loading summaries.
-5. Factor-score and mixture-profile visualization.
-6. Writeup rendering.
+1. Held-out predictive likelihood tuning over rank, component-wise `G`, and sparse loading penalty.
+2. Selected mixture model refit with MAP refinement.
+3. Loading/cross-loading summaries.
+4. Factor-score and mixture-profile visualization.
+5. Writeup rendering.
 
 Selected generated tables and plots are stored under `results/selected_tables/ifeval` and `results/selected_plots/ifeval`.
 

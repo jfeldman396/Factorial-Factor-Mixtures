@@ -70,27 +70,8 @@ The easiest way to reproduce the current analysis is:
 bash scripts/ifeval/run_full_analysis.sh
 ```
 
-This runs the singular-value shelf diagnostic, held-out-likelihood CV, selected
-mixture refit, Lambda heatmaps, marginal mixture plots, loading summaries, and
-factor-score visualizations.
-
-### Singular-Value Shelf Diagnostic
-
-```sh
-MATRIX_PATH=data/ifeval/openeval_ifeval_only_binary_matrix.csv \
-OUT_DIR=results/full/ifeval/reproduced_rank_diagnostics \
-H_MAX=10 \
-Rscript scripts/ifeval/plot_ifeval_rank_diagnostics.R
-```
-
-Primary outputs:
-
-- `ifeval_singular_value_shelf.csv`;
-- `ifeval_singular_value_shelf.png`;
-- `ifeval_intercept_only_alpha_for_rank_diagnostics.csv`.
-
-This diagnostic is descriptive.  Model selection is done by held-out predictive
-log likelihood.
+This runs held-out-likelihood CV, selected mixture refit, Lambda heatmaps,
+marginal mixture plots, loading summaries, and factor-score visualizations.
 
 ### Tune H, Component-Wise G, And Sparse Loading Penalty
 

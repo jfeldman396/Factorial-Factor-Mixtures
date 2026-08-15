@@ -4,11 +4,10 @@ This folder documents the cleaned IFEval workflow.
 
 The analysis starts from the binary item matrix and metadata in `data/ifeval`, then runs:
 
-1. Singular-value shelf diagnostics.
-2. Missing-aware held-out predictive likelihood tuning over rank, component-wise `G`, and sparse loading penalty.
-3. Selected component-wise mixture refit with MAP refinement.
-4. Loading heatmaps, cross-loading summaries, and exact item examples.
-5. Factor-score and mixture-profile visualization.
+1. Missing-aware held-out predictive likelihood tuning over rank, component-wise `G`, and sparse loading penalty.
+2. Selected component-wise mixture refit with MAP refinement.
+3. Loading heatmaps, cross-loading summaries, and exact item examples.
+4. Factor-score and mixture-profile visualization.
 
 The current component-wise interpretation uses `H = 4`,
 `G = (3,3,1,3)`, and sparse-loading MAP refinement with
