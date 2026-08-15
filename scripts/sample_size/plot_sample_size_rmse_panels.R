@@ -42,6 +42,11 @@ loading_labels <- c(
   balanced_moderate_few_positive_cross = 'Loadings = "Sparse"',
   balanced_moderate_dense_signed_cross = 'Loadings = "Cross"'
 )
+block_size_labels <- c(
+  balanced = "balanced blocks",
+  ifeval_like = "strongly unbalanced blocks",
+  moderate_ifeval_like = "unbalanced blocks"
+)
 
 compute_weight_rmse_from_recovery_tables <- function(out_dir) {
   files <- list.files(out_dir, pattern = "^joint_parameter_recovery_.*[.]csv$", full.names = TRUE)
@@ -98,6 +103,9 @@ correlation_metrics <- c("flat_parameter_corr")
 
 summarize_metrics <- function(results, metric_names) {
   group_cols <- c("loading_design", "method", "H_true", "G_true", "n", "p")
+  if ("block_size_mode" %in% names(results)) {
+    group_cols <- c("block_size_mode", group_cols)
+  }
   group_key <- interaction(results[, group_cols, drop = FALSE], drop = TRUE, sep = " | ")
   out <- lapply(split(results, group_key), function(d) {
     row <- d[1L, group_cols, drop = FALSE]
@@ -117,17 +125,25 @@ summarize_metrics <- function(results, metric_names) {
   out[order(out$loading_design, out$H_true, out$G_true, out$n, out$method), , drop = FALSE]
 }
 
-plot_recovery_panel <- function(summary, loading_design, H_value, G_value, out_file) {
+plot_recovery_panel <- function(summary, loading_design, H_value, G_value, block_size_mode, out_file) {
   d0 <- summary[
     summary$loading_design == loading_design &
       summary$H_true == H_value &
-      summary$G_true == G_value,
+      summary$G_true == G_value &
+      (!("block_size_mode" %in% names(summary)) | summary$block_size_mode == block_size_mode),
     ,
     drop = FALSE
   ]
   if (!nrow(d0)) return(invisible(FALSE))
   loading_label <- loading_labels[[loading_design]]
   if (is.null(loading_label)) loading_label <- loading_design
+  block_label <- if (!is.na(block_size_mode) && block_size_mode %in% names(block_size_labels)) {
+    block_size_labels[[block_size_mode]]
+  } else if (!is.na(block_size_mode) && is.finite(nchar(block_size_mode))) {
+    block_size_mode
+  } else {
+    "balanced blocks"
+  }
 
   n_col <- 3L
   n_row <- ceiling(length(metric_labels) / n_col)
@@ -211,7 +227,7 @@ plot_recovery_panel <- function(summary, loading_design, H_value, G_value, out_f
   mtext(
     sprintf(
       "%s | H=%d, G=%d: mean recovery metrics +/- 2 sd",
-      loading_label,
+      paste(loading_label, block_label, sep = " | "),
       H_value,
       G_value
     ),
@@ -244,16 +260,20 @@ sanitize_file_tag <- function(x) gsub("[^A-Za-z0-9]+", "_", x)
 summary <- summarize_metrics(results, names(metric_labels))
 write.csv(summary, file.path(out_dir, "checkpoint_parameter_recovery_summary.csv"), row.names = FALSE)
 
-panels <- unique(summary[, c("loading_design", "H_true", "G_true"), drop = FALSE])
+panel_cols <- c("loading_design", "H_true", "G_true")
+if ("block_size_mode" %in% names(summary)) panel_cols <- c("block_size_mode", panel_cols)
+panels <- unique(summary[, panel_cols, drop = FALSE])
 panels <- panels[order(panels$loading_design, panels$H_true, panels$G_true), , drop = FALSE]
 out_files <- character(0)
 for (i in seq_len(nrow(panels))) {
   loading_design <- panels$loading_design[i]
   H_value <- panels$H_true[i]
   G_value <- panels$G_true[i]
-  tag <- sprintf("%s_H%d_G%d", sanitize_file_tag(loading_design), H_value, G_value)
+  block_size_mode <- if ("block_size_mode" %in% names(panels)) panels$block_size_mode[i] else NA_character_
+  tag_prefix <- if (is.na(block_size_mode)) "" else paste0(sanitize_file_tag(block_size_mode), "_")
+  tag <- sprintf("%s%s_H%d_G%d", tag_prefix, sanitize_file_tag(loading_design), H_value, G_value)
   out_file <- file.path(out_dir, paste0("checkpoint_parameter_recovery_panel_", tag, ".png"))
-  plot_recovery_panel(summary, loading_design, H_value, G_value, out_file)
+  plot_recovery_panel(summary, loading_design, H_value, G_value, block_size_mode, out_file)
   out_files <- c(out_files, out_file)
 }
 

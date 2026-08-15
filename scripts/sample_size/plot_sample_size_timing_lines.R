@@ -41,6 +41,11 @@ loading_labels <- c(
   balanced_moderate_few_positive_cross = 'Loadings = "Sparse"',
   balanced_moderate_dense_signed_cross = 'Loadings = "Cross"'
 )
+block_size_labels <- c(
+  balanced = "balanced blocks",
+  ifeval_like = "strongly unbalanced blocks",
+  moderate_ifeval_like = "unbalanced blocks"
+)
 
 summarize_timing <- function(results) {
   keep <- is.finite(results$seconds) & results$seconds > 0
@@ -48,6 +53,9 @@ summarize_timing <- function(results) {
   results$log_seconds <- log(results$seconds)
 
   group_cols <- c("loading_design", "method", "H_true", "G_true", "n", "p")
+  if ("block_size_mode" %in% names(results)) {
+    group_cols <- c("block_size_mode", group_cols)
+  }
   group_key <- interaction(results[, group_cols, drop = FALSE], drop = TRUE, sep = " | ")
   out <- lapply(split(results, group_key), function(d) {
     row <- d[1L, group_cols, drop = FALSE]
@@ -68,11 +76,12 @@ summarize_timing <- function(results) {
 
 sanitize_file_tag <- function(x) gsub("[^A-Za-z0-9]+", "_", x)
 
-plot_timing_lines <- function(summary, loading_design, H_value, G_value, out_file) {
+plot_timing_lines <- function(summary, loading_design, H_value, G_value, block_size_mode, out_file) {
   d0 <- summary[
     summary$loading_design == loading_design &
       summary$H_true == H_value &
-      summary$G_true == G_value,
+      summary$G_true == G_value &
+      (!("block_size_mode" %in% names(summary)) | summary$block_size_mode == block_size_mode),
     ,
     drop = FALSE
   ]
@@ -80,6 +89,13 @@ plot_timing_lines <- function(summary, loading_design, H_value, G_value, out_fil
 
   loading_label <- loading_labels[[loading_design]]
   if (is.null(loading_label)) loading_label <- loading_design
+  block_label <- if (!is.na(block_size_mode) && block_size_mode %in% names(block_size_labels)) {
+    block_size_labels[[block_size_mode]]
+  } else if (!is.na(block_size_mode) && is.finite(nchar(block_size_mode))) {
+    block_size_mode
+  } else {
+    "balanced blocks"
+  }
 
   y_values <- c(d0$mean_log_seconds, d0$lower_log_seconds, d0$upper_log_seconds)
   y_values <- y_values[is.finite(y_values)]
@@ -103,7 +119,7 @@ plot_timing_lines <- function(summary, loading_design, H_value, G_value, out_fil
     xaxt = "n",
     xlab = "n",
     ylab = "log(seconds)",
-    main = sprintf("%s | H=%d, G=%d: runtime", loading_label, H_value, G_value)
+    main = sprintf("%s | %s | H=%d, G=%d: runtime", loading_label, block_label, H_value, G_value)
   )
   axis(1, at = ns, labels = ns)
   grid(col = "#E2E2E2")
@@ -157,16 +173,20 @@ plot_timing_lines <- function(summary, loading_design, H_value, G_value, out_fil
 summary <- summarize_timing(results)
 write.csv(summary, file.path(out_dir, "checkpoint_timing_log_seconds_summary.csv"), row.names = FALSE)
 
-panels <- unique(summary[, c("loading_design", "H_true", "G_true"), drop = FALSE])
+panel_cols <- c("loading_design", "H_true", "G_true")
+if ("block_size_mode" %in% names(summary)) panel_cols <- c("block_size_mode", panel_cols)
+panels <- unique(summary[, panel_cols, drop = FALSE])
 panels <- panels[order(panels$loading_design, panels$H_true, panels$G_true), , drop = FALSE]
 out_files <- character(0)
 for (i in seq_len(nrow(panels))) {
   loading_design <- panels$loading_design[i]
   H_value <- panels$H_true[i]
   G_value <- panels$G_true[i]
-  tag <- sprintf("%s_H%d_G%d", sanitize_file_tag(loading_design), H_value, G_value)
+  block_size_mode <- if ("block_size_mode" %in% names(panels)) panels$block_size_mode[i] else NA_character_
+  tag_prefix <- if (is.na(block_size_mode)) "" else paste0(sanitize_file_tag(block_size_mode), "_")
+  tag <- sprintf("%s%s_H%d_G%d", tag_prefix, sanitize_file_tag(loading_design), H_value, G_value)
   out_file <- file.path(out_dir, paste0("checkpoint_timing_log_seconds_", tag, ".png"))
-  plot_timing_lines(summary, loading_design, H_value, G_value, out_file)
+  plot_timing_lines(summary, loading_design, H_value, G_value, block_size_mode, out_file)
   out_files <- c(out_files, out_file)
 }
 

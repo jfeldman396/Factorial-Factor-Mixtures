@@ -75,6 +75,7 @@ loading_designs <- get_env(
   c("block_sparse", "block_sparse_multisigned"),
   split_csv
 )
+block_size_mode <- get_env("BLOCK_SIZE_MODE", "balanced", as.character)
 np_settings <- get_env(
   "NP_GRID",
   data.frame(np_regime = "smoke_wide", n = 80L, p = 120L),
@@ -225,6 +226,48 @@ balanced_block_sizes <- function(p, H) {
   block_sizes
 }
 
+ifeval_like_block_sizes <- function(p, H) {
+  proportions <- switch(
+    as.character(H),
+    "3" = c(425, 31, 44) / 500,
+    "4" = c(415, 35, 18, 32) / 500,
+    rep(1 / H, H)
+  )
+  raw_sizes <- floor(p * proportions)
+  remainder <- p - sum(raw_sizes)
+  if (remainder > 0L) {
+    order_idx <- order(p * proportions - raw_sizes, decreasing = TRUE)
+    raw_sizes[order_idx[seq_len(remainder)]] <- raw_sizes[order_idx[seq_len(remainder)]] + 1L
+  }
+  pmax(raw_sizes, 1L)
+}
+
+moderate_ifeval_like_block_sizes <- function(p, H, blend_to_balanced = 0.50) {
+  ifeval_proportions <- switch(
+    as.character(H),
+    "3" = c(425, 31, 44) / 500,
+    "4" = c(415, 35, 18, 32) / 500,
+    rep(1 / H, H)
+  )
+  balanced_proportions <- rep(1 / H, H)
+  proportions <- (1 - blend_to_balanced) * ifeval_proportions +
+    blend_to_balanced * balanced_proportions
+  raw_sizes <- floor(p * proportions)
+  remainder <- p - sum(raw_sizes)
+  if (remainder > 0L) {
+    order_idx <- order(p * proportions - raw_sizes, decreasing = TRUE)
+    raw_sizes[order_idx[seq_len(remainder)]] <- raw_sizes[order_idx[seq_len(remainder)]] + 1L
+  }
+  pmax(raw_sizes, 1L)
+}
+
+make_block_sizes <- function(p, H, mode = block_size_mode) {
+  mode <- match.arg(mode, c("balanced", "ifeval_like", "moderate_ifeval_like"))
+  if (mode == "ifeval_like") return(ifeval_like_block_sizes(p, H))
+  if (mode == "moderate_ifeval_like") return(moderate_ifeval_like_block_sizes(p, H))
+  balanced_block_sizes(p, H)
+}
+
 neighboring_factors_global <- function(h, H, n_cross) {
   if (H <= 1L || n_cross == 0L) return(integer(0))
   offsets <- as.vector(rbind(seq_len(H - 1L), -seq_len(H - 1L)))
@@ -244,7 +287,7 @@ block_sign_matrix <- function(H) {
 }
 
 make_strong_same_sign_loadings <- function(design_name, p, H) {
-  block_sizes <- balanced_block_sizes(p, H)
+  block_sizes <- make_block_sizes(p, H)
   block_id <- rep(seq_len(H), times = block_sizes)
   signs <- block_sign_matrix(H)
   Lambda <- matrix(0, p, H)
@@ -1313,6 +1356,7 @@ for (row_idx in seq_len(nrow(design_grid))) {
       intercept_block_span = intercept_block_span,
       intercept_clip = intercept_clip,
       loading_design = row$loading_design,
+      block_size_mode = block_size_mode,
       mixture_update = mixture_update,
       mu_prior_mean = mu_prior_mean,
       mu_prior_kappa = mu_prior_kappa,
@@ -1401,6 +1445,7 @@ for (row_idx in seq_len(nrow(design_grid))) {
       intercept_block_span = intercept_block_span,
       intercept_clip = intercept_clip,
       loading_design = row$loading_design,
+      block_size_mode = block_size_mode,
       mfa_eval,
       mfa_param_recovery$summary,
       mfa_all_param_recovery,
@@ -1438,7 +1483,8 @@ summarize_results <- function(results) {
   if (!nrow(results)) return(data.frame())
   group_cols <- c(
     "method", "np_regime", "n", "p", "H_true", "G_true", "K_joint",
-    "separation", "mixture_param_mode", "mixture_variance_mode", "loading_design"
+    "separation", "mixture_param_mode", "mixture_variance_mode", "loading_design",
+    "block_size_mode"
   )
   metric_cols <- c(
     "mean_factor_abs_cor", "min_factor_abs_cor", "lambda_corr", "lambda_rmse",

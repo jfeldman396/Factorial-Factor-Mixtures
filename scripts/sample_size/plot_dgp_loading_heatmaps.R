@@ -29,6 +29,7 @@ dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 p <- get_env("P", 500L, as.integer)
 H_values <- get_env("H_VALUES", c(3L, 4L), parse_int_csv)
 figure_seed <- get_env("FIGURE_SEED", 20260813L, as.integer)
+block_size_mode <- get_env("BLOCK_SIZE_MODE", "balanced", as.character)
 
 loading_designs <- c(
   sparse = "balanced_moderate_few_positive_cross",
@@ -38,12 +39,59 @@ loading_titles <- c(
   sparse = 'Loadings = "Sparse"',
   cross = 'Loadings = "Cross"'
 )
+block_size_titles <- c(
+  balanced = "balanced blocks",
+  ifeval_like = "strongly unbalanced blocks",
+  moderate_ifeval_like = "unbalanced blocks"
+)
 
 balanced_block_sizes <- function(p, H) {
   block_sizes <- rep(floor(p / H), H)
   remainder <- p - sum(block_sizes)
   if (remainder > 0L) block_sizes[seq_len(remainder)] <- block_sizes[seq_len(remainder)] + 1L
   block_sizes
+}
+
+ifeval_like_block_sizes <- function(p, H) {
+  proportions <- switch(
+    as.character(H),
+    "3" = c(425, 31, 44) / 500,
+    "4" = c(415, 35, 18, 32) / 500,
+    rep(1 / H, H)
+  )
+  raw_sizes <- floor(p * proportions)
+  remainder <- p - sum(raw_sizes)
+  if (remainder > 0L) {
+    order_idx <- order(p * proportions - raw_sizes, decreasing = TRUE)
+    raw_sizes[order_idx[seq_len(remainder)]] <- raw_sizes[order_idx[seq_len(remainder)]] + 1L
+  }
+  pmax(raw_sizes, 1L)
+}
+
+moderate_ifeval_like_block_sizes <- function(p, H, blend_to_balanced = 0.50) {
+  ifeval_proportions <- switch(
+    as.character(H),
+    "3" = c(425, 31, 44) / 500,
+    "4" = c(415, 35, 18, 32) / 500,
+    rep(1 / H, H)
+  )
+  balanced_proportions <- rep(1 / H, H)
+  proportions <- (1 - blend_to_balanced) * ifeval_proportions +
+    blend_to_balanced * balanced_proportions
+  raw_sizes <- floor(p * proportions)
+  remainder <- p - sum(raw_sizes)
+  if (remainder > 0L) {
+    order_idx <- order(p * proportions - raw_sizes, decreasing = TRUE)
+    raw_sizes[order_idx[seq_len(remainder)]] <- raw_sizes[order_idx[seq_len(remainder)]] + 1L
+  }
+  pmax(raw_sizes, 1L)
+}
+
+make_block_sizes <- function(p, H, mode = block_size_mode) {
+  mode <- match.arg(mode, c("balanced", "ifeval_like", "moderate_ifeval_like"))
+  if (mode == "ifeval_like") return(ifeval_like_block_sizes(p, H))
+  if (mode == "moderate_ifeval_like") return(moderate_ifeval_like_block_sizes(p, H))
+  balanced_block_sizes(p, H)
 }
 
 block_sign_matrix <- function(H) {
@@ -53,7 +101,7 @@ block_sign_matrix <- function(H) {
 }
 
 make_strong_same_sign_loadings <- function(design_name, p, H) {
-  block_sizes <- balanced_block_sizes(p, H)
+  block_sizes <- make_block_sizes(p, H)
   block_id <- rep(seq_len(H), times = block_sizes)
   signs <- block_sign_matrix(H)
   Lambda <- matrix(0, p, H)
@@ -146,11 +194,12 @@ write_lambda_table <- function(Lambda, block_id, design_key, H, out_file) {
     item = seq_len(nrow(Lambda)),
     block = block_id,
     loading_design = loading_titles[[design_key]],
+    block_size_mode = block_size_mode,
     H = H,
     Lambda,
     check.names = FALSE
   )
-  names(tab)[seq_len(H) + 4L] <- paste0("F", seq_len(H))
+  names(tab)[seq_len(H) + 5L] <- paste0("F", seq_len(H))
   write.csv(tab, out_file, row.names = FALSE)
 }
 
@@ -159,7 +208,12 @@ for (H in H_values) {
   for (design_key in names(loading_designs)) {
     loading <- make_design_lambda(design_key, H = H, p = p, figure_seed = figure_seed)
     tag <- paste0(design_key, "_H", H)
-    title <- sprintf("%s | H=%d DGP Lambda", loading_titles[[design_key]], H)
+    block_title <- if (block_size_mode %in% names(block_size_titles)) {
+      block_size_titles[[block_size_mode]]
+    } else {
+      block_size_mode
+    }
+    title <- sprintf("%s | %s | H=%d DGP Lambda", loading_titles[[design_key]], block_title, H)
     png_file <- file.path(out_dir, paste0("dgp_lambda_heatmap_", tag, ".png"))
     csv_file <- file.path(out_dir, paste0("dgp_lambda_matrix_", tag, ".csv"))
     plot_lambda_heatmap(loading$Lambda, loading$block_id, title, png_file)
