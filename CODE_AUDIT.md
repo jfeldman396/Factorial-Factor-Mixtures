@@ -14,10 +14,14 @@ Scope checked:
   - `data/ifeval/openeval_item_metadata.csv`;
   - `data/ifeval/openeval_model_metadata.csv`.
 - Verified key replication entry points exist:
-  - `scripts/ifeval/fit_interpret_ifeval_H3_G3.R`;
   - `scripts/ifeval/cv_ifeval_rank_lambda_models.R`;
+  - `scripts/ifeval/fit_interpret_ifeval_mixture.R`;
   - `scripts/sample_size/run_moderate_crossloading_sample_size_MAP_intercepts.R`;
   - `scripts/sample_size/plot_sample_size_rmse_panels.R`.
+- Smoke-tested the cleaned IFEval CV script with a tiny `H=1, G=1` two-fold run.
+- Smoke-tested the cleaned selected-fit script with a tiny `H=1, G=1` run.
+- Smoke-tested the singular-value shelf diagnostic with `H_MAX=3`.
+- Checked `scripts/ifeval/run_full_analysis.sh` with `zsh -n`.
 - Re-rendered the component-wise IFEval writeup PDF:
   - `writeup/ifeval_componentwise_G3313.pdf`.
 - Visually inspected the rendered PDF pages containing:
@@ -36,12 +40,13 @@ Rscript -e 'files <- c(Sys.glob("R/*.R"), Sys.glob("scripts/*/*.R")); bad <- cha
 Result:
 
 ```text
-Parsed 26 R files; failures 0
+Parsed 18 R files; failures 0
 ```
 
 ## Remaining Audit Caveats
 
 - This was a static code-path and documentation audit, not a fresh end-to-end rerun of the full IFEval cross-validation grid or full sample-size simulation.
 - The full column-wise IFEval CV grid is computationally heavier than the selected-model refits. Use `RESUME_EXISTING=TRUE` and checkpointed output directories for full reruns.
-- Some older scripts and filenames retain `H3_G3` in their names for historical reasons, but `fit_interpret_ifeval_H3_G3.R` now accepts arbitrary `H_FIXED` and scalar or vector `G_FIXED`.
+- The selected-fit script `fit_interpret_ifeval_mixture.R` accepts arbitrary
+  `H_FIXED` and scalar or vector `G_FIXED`.
 - Full generated outputs under `results/full/` or temporary analysis folders are intentionally not committed. Paper-facing snapshots and writeups are committed.

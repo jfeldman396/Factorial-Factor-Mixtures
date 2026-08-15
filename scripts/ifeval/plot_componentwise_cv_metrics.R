@@ -46,8 +46,6 @@ summary_list <- lapply(split(scores, split_key), function(d) {
     n_folds = nrow(d),
     mean_heldout_loglik_per_response = mean(d$heldout_loglik_per_response),
     se_heldout_loglik_per_response = if (nrow(d) > 1L) sd(d$heldout_loglik_per_response) / sqrt(nrow(d)) else NA_real_,
-    mean_heldout_bic = mean(d$heldout_bic),
-    mean_training_bic = mean(d$training_bic),
     mean_fit_seconds = mean(d$fit_seconds),
     stringsAsFactors = FALSE
   )

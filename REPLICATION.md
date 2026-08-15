@@ -56,36 +56,77 @@ The cleaned input files are:
 - `data/ifeval/openeval_item_metadata.csv`;
 - `data/ifeval/openeval_model_metadata.csv`.
 
-The current model-selection analysis fits independent-mixture binary probit
-factor models with item intercepts `alpha_j`, sparse loadings, ranks
-`H = 1,...,5`, and column-specific component counts `G_h`.  The main
-columnwise grid allows `G_h in {1,2,3}` while restricting the model to at most
-one Gaussian coordinate (`G_h = 1`), which matches the ICA-identifiability
-caveat used in the paper discussion.
+The current IFEval workflow fits only the proposed independent-mixture probit
+factor model.  Rank `H`, component counts `G_h`, and the entrywise sparse
+loading penalty are tuned by held-out predictive log likelihood on randomly
+removed model-by-item cells.  The current component-wise grid allows
+`G_h in {1,2,3}` with at most one Gaussian coordinate (`G_h = 1`).
 
-### Rank Diagnostics: Singular-Value Shelf And Bai-Ng ICp2
+### Run The Current IFEval Pipeline
 
-Before fitting the selected model, run the lightweight spectral diagnostics:
+The easiest way to reproduce the current analysis is:
+
+```sh
+bash scripts/ifeval/run_full_analysis.sh
+```
+
+This runs the singular-value shelf diagnostic, held-out-likelihood CV, selected
+mixture refit, Lambda heatmaps, marginal mixture plots, loading summaries, and
+factor-score visualizations.
+
+### Singular-Value Shelf Diagnostic
 
 ```sh
 MATRIX_PATH=data/ifeval/openeval_ifeval_only_binary_matrix.csv \
-OUT_DIR=results/full/ifeval/reproduced_openeval_ifeval_rank_diagnostics \
+OUT_DIR=results/full/ifeval/reproduced_rank_diagnostics \
 H_MAX=10 \
 Rscript scripts/ifeval/plot_ifeval_rank_diagnostics.R
 ```
 
-This produces:
+Primary outputs:
 
 - `ifeval_singular_value_shelf.csv`;
 - `ifeval_singular_value_shelf.png`;
-- `ifeval_bai_ng_icp2_rank_diagnostic.csv`;
-- `ifeval_bai_ng_icp2_rank_diagnostic.png`.
+- `ifeval_intercept_only_alpha_for_rank_diagnostics.csv`.
 
-The singular-value shelf is computed from an intercept-only probit augmentation of the binary matrix. The same output reports the Bai-Ng `ICp2` plug-in criterion for comparison.
+This diagnostic is descriptive.  Model selection is done by held-out predictive
+log likelihood.
 
-### Refit The Selected Mixture Model
+### Tune H, Component-Wise G, And Sparse Loading Penalty
 
-The current component-wise IFEval interpretation uses:
+```sh
+OUT_DIR=results/full/ifeval_columnwise_G_cv_atmost1_gaussian \
+H_GRID=1:5 \
+G_MODE=column_grid \
+G_GRID=1,2,3 \
+G_COMPONENT_VALUES=1,2,3 \
+MAX_GAUSSIAN_COORDS=1 \
+LAMBDA_L1_GRID=0,1,2,4,8,12 \
+K_FOLDS=3 \
+WORKERS=6 \
+PRETRAIN_AUG_ITER=20 \
+REFINE_ITER=20 \
+MIXTURE_MAX_ITER=200 \
+FIT_SELECTED_AFTER_CV=TRUE \
+SAVE_FITS=FALSE \
+RESUME_EXISTING=TRUE \
+REFRESH_PLOTS=TRUE \
+Rscript scripts/ifeval/cv_ifeval_rank_lambda_models.R
+```
+
+Primary outputs:
+
+- `ifeval_rank_lambda_cv_fold_scores.csv`;
+- `ifeval_rank_lambda_cv_histories.csv`;
+- `ifeval_rank_lambda_cv_summary.csv`;
+- `ifeval_rank_lambda_selected_by_heldout_ll.csv`;
+- `rank_lambda_top_candidates_by_heldout_ll.csv`;
+- `rank_lambda_top_candidates_by_heldout_ll.png`;
+- selected full-data mixture refit folder when `FIT_SELECTED_AFTER_CV=TRUE`.
+
+### Refit The Interpretable Component-Wise Model
+
+The current component-wise interpretation uses:
 
 - `H = 4`;
 - `G = (3,3,1,3)`, so the third coordinate is Gaussian;
@@ -106,11 +147,8 @@ REFINE_ITER=20 \
 MIXTURE_MAX_ITER=200 \
 REQUIRE_MIXTURE_CONVERGENCE=TRUE \
 REFINEMENT_LAMBDA_L1_PENALTY=4 \
-Rscript scripts/ifeval/fit_interpret_ifeval_H3_G3.R
+Rscript scripts/ifeval/fit_interpret_ifeval_mixture.R
 ```
-
-Despite the historical filename, `fit_interpret_ifeval_H3_G3.R` accepts
-arbitrary `H_FIXED` and either scalar or comma-separated vector `G_FIXED`.
 
 Primary outputs:
 
@@ -121,159 +159,10 @@ Primary outputs:
 - `openeval_factor_mixture_groups.csv`;
 - loading, marginal-mixture, factor-score, and profile plots.
 
-The rendered component-wise writeup is:
-
-```text
-writeup/ifeval_componentwise_G3313.pdf
-```
-
-It summarizes the selected fit, compact cross-loading examples, and LLM
-ability profiles by factor.
-
-For the older fixed `H = 3, G = 3` analysis, run:
-
-```sh
-MATRIX_PATH=data/ifeval/openeval_ifeval_only_binary_matrix.csv \
-ITEM_METADATA_PATH=data/ifeval/openeval_item_metadata.csv \
-OUT_DIR=results/full/ifeval/reproduced_openeval_ifeval_H3_G3_interpretation \
-H_FIXED=3 \
-G_FIXED=3 \
-WORKERS=8 \
-REFINEMENT_LAMBDA_L1_PENALTY=10 \
-Rscript scripts/ifeval/fit_interpret_ifeval_H3_G3.R
-```
-
-Primary outputs:
-
-- `openeval_item_intercepts_loadings_metadata.csv`;
-- `openeval_model_factor_scores_profiles.csv`;
-- `openeval_factor_interpretation_summary.csv`;
-- `openeval_top_loading_item_examples.csv`;
-- `openeval_factor_mixture_groups.csv`;
-- loading and factor-score plots.
-
-### Tune The Sparse Loading Penalty
-
-Run:
-
-```sh
-MATRIX_PATH=data/ifeval/openeval_ifeval_only_binary_matrix.csv \
-OUT_DIR=results/full/ifeval/reproduced_openeval_ifeval_lambda_sparsity_tuning \
-H_FIXED=3 \
-G_FIXED=3 \
-WORKERS=8 \
-Rscript scripts/ifeval/tune_ifeval_lambda_sparsity.R
-```
-
-Primary outputs:
-
-- `ifeval_lambda_sparsity_tuning_summary.csv`;
-- `ifeval_selected_lambda_sparsity_penalty.csv`;
-- `ifeval_lambda_sparsity_tuning_path.png`;
-- fitted `.rds` files for each lambda penalty.
-
-The committed selected analysis used lambda penalty `10`.
-
-### Tune Rank, Column-Specific G, And Sparse Loading Penalty By Held-Out Likelihood
-
-The current IFEval tuning run randomly holds out model-by-item cells and scores
-held-out predictive log likelihood.  Held-out cells are excluded from probit
-augmentation, loading updates, factor-score updates, and mixture updates.
-
-Run:
-
-```sh
-OUT_DIR=results/full/ifeval_columnwise_G_cv_atmost1_gaussian \
-H_GRID=1:5 \
-G_MODE=column_grid \
-G_GRID=1,2,3 \
-G_COMPONENT_VALUES=1,2,3 \
-MAX_GAUSSIAN_COORDS=1 \
-LAMBDA_L1_GRID=0,1,2,4,8,12 \
-METHODS=mixture,ordinary \
-K_FOLDS=3 \
-WORKERS=6 \
-PRETRAIN_AUG_ITER=20 \
-REFINE_ITER=20 \
-MIXTURE_MAX_ITER=200 \
-FIT_SELECTED_AFTER_CV=TRUE \
-SAVE_FITS=FALSE \
-RESUME_EXISTING=TRUE \
-REFRESH_PLOTS=FALSE \
-Rscript scripts/ifeval/cv_ifeval_rank_lambda_models.R
-```
-
-Primary outputs:
-
-- `ifeval_rank_lambda_cv_fold_scores.csv`;
-- `ifeval_rank_lambda_cv_histories.csv`;
-- `ifeval_rank_lambda_cv_summary.csv`;
-- `ifeval_rank_lambda_selected_by_heldout_ll.csv`;
-- selected-model refit folders for the best mixture and ordinary probit models.
-
-After the grid finishes, regenerate the rank/lambda summary plots without
-refitting by rerunning the same command with:
-
-```sh
-FIT_SELECTED_AFTER_CV=FALSE REFRESH_PLOTS=TRUE
-```
-
-This produces:
-
-- `rank_lambda_top_candidates_by_heldout_ll.csv`;
-- `rank_lambda_top_candidates_by_heldout_ll.png`;
-- line plots when the plotted candidate set is small enough to facet cleanly.
-
-### Fit Ordinary Binary Probit Comparator
-
-Run:
-
-```sh
-MMLU_MATRIX=data/ifeval/openeval_ifeval_only_binary_matrix.csv \
-OUT_DIR=results/full/ifeval/reproduced_openeval_ifeval_ordinary_probit_H3_visualization \
-H=3 \
-WORKERS=8 \
-AUG_ITER=4 \
-REFINE_ITER=10 \
-LAMBDA_L1=2 \
-Rscript scripts/ifeval/fit_visualize_ordinary_probit_factors.R
-```
-
-Primary outputs:
-
-- `ordinary_probit_lambda.csv`;
-- `ordinary_probit_factor_scores.csv`;
-- `ordinary_probit_lambda_heatmap.png`;
-- ordinary-factor score plots.
-
-### Compare Ordinary And Mixture Factors
-
-After refitting both the selected mixture model and ordinary comparator, run:
-
-```sh
-ORDINARY_DIR=results/full/ifeval/reproduced_openeval_ifeval_ordinary_probit_H3_visualization \
-MIXTURE_DIR=results/full/ifeval/reproduced_openeval_ifeval_H3_G3_interpretation \
-OUT_DIR=results/full/ifeval/reproduced_openeval_ordinary_vs_mixture_H3 \
-Rscript scripts/ifeval/summarize_openeval_ordinary_probit_factors.R
-```
-
-Then regenerate the side-by-side loading plots:
-
-```sh
-MATRIX_PATH=data/ifeval/openeval_ifeval_only_binary_matrix.csv \
-MIXTURE_LOADINGS_PATH=results/full/ifeval/reproduced_openeval_ifeval_H3_G3_interpretation/openeval_item_intercepts_loadings_metadata.csv \
-ORDINARY_LAMBDA_PATH=results/full/ifeval/reproduced_openeval_ifeval_ordinary_probit_H3_visualization/ordinary_probit_lambda.csv \
-ORDINARY_MIXTURE_COR_PATH=results/full/ifeval/reproduced_openeval_ordinary_vs_mixture_H3/ordinary_mixture_factor_correlation_matrix.csv \
-OUT_DIR=results/full/ifeval/reproduced_openeval_ordinary_vs_mixture_H3 \
-Rscript scripts/ifeval/plot_openeval_side_by_side_lambdas.R
-```
-
 ### Summarize Loadings And Cross-Loadings
 
-Run:
-
 ```sh
-LOADINGS_PATH=results/full/ifeval/reproduced_openeval_ifeval_H3_G3_interpretation/openeval_item_intercepts_loadings_metadata.csv \
+LOADINGS_PATH=results/full/ifeval/reproduced_componentwise_H4_G3313_lambda4/openeval_item_intercepts_loadings_metadata.csv \
 OUT_DIR=results/full/ifeval/loadings_crossloadings \
 Rscript scripts/ifeval/summarize_ifeval_loadings_crossloadings.R
 ```
@@ -286,12 +175,18 @@ Primary outputs:
 - `ifeval_G3_cross_loading_items.csv`;
 - heatmaps for sparse and cross-loading items.
 
-### Regenerate 3D IFEval Visualizations
-
-Base R plots:
+### Regenerate Selected-Fit Visualizations
 
 ```sh
-FIT_DIR=results/full/ifeval/reproduced_openeval_ifeval_H3_G3_interpretation \
+FIT_DIR=results/full/ifeval/reproduced_componentwise_H4_G3313_lambda4 \
+OUT_DIR=results/full/ifeval/selected_visualizations \
+Rscript scripts/ifeval/plot_openeval_mixture_lambda_heatmaps.R
+
+FIT_DIR=results/full/ifeval/reproduced_componentwise_H4_G3313_lambda4 \
+OUT_DIR=results/full/ifeval/selected_visualizations \
+Rscript scripts/ifeval/plot_factor_marginal_mixtures.R
+
+FIT_DIR=results/full/ifeval/reproduced_componentwise_H4_G3313_lambda4 \
 OUT_DIR=results/full/ifeval/ifeval_3d_factor_visualizations \
 Rscript scripts/ifeval/plot_ifeval_learned_factors_baseR.R
 ```
@@ -299,58 +194,19 @@ Rscript scripts/ifeval/plot_ifeval_learned_factors_baseR.R
 Optional Python/Plotly plots:
 
 ```sh
-FIT_DIR=results/full/ifeval/reproduced_openeval_ifeval_H3_G3_interpretation \
+FIT_DIR=results/full/ifeval/reproduced_componentwise_H4_G3313_lambda4 \
 OUT_DIR=results/full/ifeval/ifeval_3d_factor_visualizations \
 python3 scripts/ifeval/plot_ifeval_learned_factors.py
 ```
 
-### Reproduce Rank-Selection Comparison Plots
+The rendered component-wise writeup is:
 
-The repository includes lightweight CV summary inputs for the mixture rank-selection fits under:
-
-- `results/selected_tables/ifeval/cv_inputs/mixture_G2_H_summary.csv`;
-- `results/selected_tables/ifeval/cv_inputs/mixture_G2_fold_scores.csv`;
-- `results/selected_tables/ifeval/cv_inputs/mixture_G3_H_summary.csv`;
-- `results/selected_tables/ifeval/cv_inputs/mixture_G3_fold_scores.csv`.
-- `results/selected_tables/ifeval/cv_inputs/ordinary_probit_H_summary.csv`;
-- `results/selected_tables/ifeval/cv_inputs/ordinary_probit_factor_fold_scores.csv`.
-
-To rerun the ordinary-probit CV from the raw IFEval matrix:
-
-```sh
-MATRIX_PATH=data/ifeval/openeval_ifeval_only_binary_matrix.csv \
-OUT_DIR=results/full/ifeval/openeval_ifeval_cv_H1_10_ordinary \
-H_GRID=1:10 \
-K_FOLDS=3 \
-WORKERS=8 \
-AUG_ITER=4 \
-REFINE_ITER=5 \
-LAMBDA_L1=2 \
-Rscript scripts/ifeval/openeval_ordinary_probit_cv_H_selection.R
+```text
+writeup/ifeval_componentwise_G3313.pdf
 ```
 
-Then regenerate the rank-selection comparison figures:
-
-```sh
-G2_H_SUMMARY=results/selected_tables/ifeval/cv_inputs/mixture_G2_H_summary.csv \
-G2_FOLD_SCORES=results/selected_tables/ifeval/cv_inputs/mixture_G2_fold_scores.csv \
-G3_H_SUMMARY=results/selected_tables/ifeval/cv_inputs/mixture_G3_H_summary.csv \
-G3_FOLD_SCORES=results/selected_tables/ifeval/cv_inputs/mixture_G3_fold_scores.csv \
-ORDINARY_H_SUMMARY=results/full/ifeval/openeval_ifeval_cv_H1_10_ordinary/ordinary_probit_H_summary.csv \
-ORDINARY_FOLD_SCORES=results/full/ifeval/openeval_ifeval_cv_H1_10_ordinary/ordinary_probit_factor_fold_scores.csv \
-OUT_DIR=results/full/ifeval/reproduced_openeval_ifeval_rank_selection_comparison \
-Rscript scripts/ifeval/summarize_openeval_rank_selection_cv.R
-```
-
-If you do not rerun the ordinary-probit CV first, the summary script defaults to the committed ordinary-probit CV inputs in `results/selected_tables/ifeval/cv_inputs/`.
-
-This summary reports three criteria by candidate rank:
-
-- held-out predictive log likelihood on the randomly removed cells;
-- held-out BIC, `-2 log L_heldout + df log(N_heldout)`;
-- training BIC, `-2 log L_train + df log(N_train)`.
-
-The heavy per-fold mixture-CV `.rds` files are not committed. The committed summaries are sufficient to regenerate the paper-facing rank-selection comparison tables and plots.
+It summarizes the selected fit, compact cross-loading examples, and LLM
+ability profiles by factor.
 
 ## Sample-Size Simulation
 

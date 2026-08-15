@@ -45,12 +45,12 @@ bash scripts/ifeval/run_full_analysis.sh
 
 The major steps are:
 
-1. Rank selection and predictive comparison across candidate ranks.
-2. Ordinary binary probit factor model fit for the selected rank.
-3. Mixture binary probit factor fit with tuned sparse loading penalty.
+1. Singular-value shelf diagnostic.
+2. Held-out predictive likelihood tuning over rank, component-wise `G`, and sparse loading penalty.
+3. Selected mixture model refit with MAP refinement.
 4. Loading/cross-loading summaries.
-5. 3D factor-score visualization.
-6. LaTeX writeup rendering.
+5. Factor-score and mixture-profile visualization.
+6. Writeup rendering.
 
 Selected generated tables and plots are stored under `results/selected_tables/ifeval` and `results/selected_plots/ifeval`.
 
@@ -70,7 +70,7 @@ REFINE_ITER=20 \
 MIXTURE_MAX_ITER=200 \
 REQUIRE_MIXTURE_CONVERGENCE=TRUE \
 REFINEMENT_LAMBDA_L1_PENALTY=4 \
-Rscript scripts/ifeval/fit_interpret_ifeval_H3_G3.R
+Rscript scripts/ifeval/fit_interpret_ifeval_mixture.R
 ```
 
 The compact writeup for this fit is `writeup/ifeval_componentwise_G3313.pdf`.

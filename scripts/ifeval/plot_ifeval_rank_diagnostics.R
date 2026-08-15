@@ -1,13 +1,10 @@
 #!/usr/bin/env Rscript
 
-# IFEval rank diagnostics:
-#   1. singular-value shelf from an intercept-only probit augmentation;
-#   2. Bai-Ng ICp2 plug-in criterion on the same augmented matrix.
+# IFEval rank diagnostic:
+#   singular-value shelf from an intercept-only probit augmentation.
 #
-# These diagnostics are descriptive complements to the random-cell holdout
-# rank-selection scripts.  They are intentionally lightweight: no model fitting
-# over H is required.  Model-based held-out BIC is computed in
-# summarize_openeval_rank_selection_cv.R from the fold-score files.
+# This is a descriptive complement to random-cell held-out likelihood tuning.
+# It is intentionally lightweight: no model fitting over H is required.
 
 options(stringsAsFactors = FALSE)
 
@@ -61,31 +58,20 @@ make_intercept_augmented_Z <- function(X) {
 }
 
 spectral_rank_table <- function(Z, H_max, center = TRUE) {
-  # Singular values and the Bai-Ng ICp2 plug-in criterion for the augmented
-  # latent matrix.  This is not a model BIC; it is a quick spectral diagnostic
-  # used to see whether there is a visible singular-value shelf.
+  # Singular values of the augmented latent matrix. This is a quick spectral
+  # diagnostic used to see whether there is a visible singular-value shelf.
   Z_work <- if (isTRUE(center)) sweep(Z, 2L, colMeans(Z), "-") else Z
   n <- nrow(Z_work)
   p <- ncol(Z_work)
   H_max <- min(as.integer(H_max), n - 1L, p)
   dec <- svd(Z_work, nu = 0, nv = 0)
   d <- dec$d
-  total_sse <- sum(Z_work^2)
-  cumulative_signal <- cumsum(d[seq_len(H_max)]^2)
-  sse <- pmax(total_sse - cumulative_signal, .Machine$double.eps)
-  N <- n * p
   H <- seq_len(H_max)
-  residual_variance <- sse / N
-  icp2_penalty <- (n + p) / (n * p) * log(min(n, p))
-  icp2 <- log(residual_variance) + H * icp2_penalty
 
   data.frame(
     H = H,
     singular_value = d[H],
-    singular_value_ratio_to_next = d[H] / c(d[H[-1L]], if (length(d) > H_max) d[H_max + 1L] else NA_real_),
-    residual_variance = residual_variance,
-    bai_ng_icp2 = icp2,
-    selected_by_bai_ng_icp2 = icp2 == min(icp2)
+    singular_value_ratio_to_next = d[H] / c(d[H[-1L]], if (length(d) > H_max) d[H_max + 1L] else NA_real_)
   )
 }
 
@@ -104,14 +90,6 @@ plot_rank_diagnostics <- function(rank_df, out_dir) {
   grid(col = "gray85")
   par(op)
   dev.off()
-
-  png(file.path(out_dir, "ifeval_bai_ng_icp2_rank_diagnostic.png"), width = 1100, height = 850, res = 160)
-  plot(rank_df$H, rank_df$bai_ng_icp2, type = "b", pch = 19, lwd = 2,
-       col = "#4A5568", xlab = "candidate rank H", ylab = "ICp2",
-       main = "Bai-Ng ICp2 Plug-In")
-  abline(v = rank_df$H[rank_df$selected_by_bai_ng_icp2][1L], lty = 2, col = "#BC4749")
-  grid(col = "gray85")
-  dev.off()
 }
 
 X <- read_binary_matrix(matrix_path)
@@ -120,7 +98,6 @@ rank_df <- spectral_rank_table(aug$Z, H_max = H_max, center = center_augmented_Z
 
 singular_out <- rank_df[, c("H", "singular_value", "singular_value_ratio_to_next"), drop = FALSE]
 write.csv(singular_out, file.path(out_dir, "ifeval_singular_value_shelf.csv"), row.names = FALSE)
-write.csv(rank_df, file.path(out_dir, "ifeval_bai_ng_icp2_rank_diagnostic.csv"), row.names = FALSE)
 write.csv(
   data.frame(item = colnames(X), intercept_only_alpha = aug$alpha),
   file.path(out_dir, "ifeval_intercept_only_alpha_for_rank_diagnostics.csv"),
@@ -130,4 +107,3 @@ write.csv(
 plot_rank_diagnostics(rank_df, out_dir)
 
 cat("\nIFEval rank diagnostics written to:\n", out_dir, "\n", sep = "")
-cat("Selected H by Bai-Ng ICp2: ", rank_df$H[rank_df$selected_by_bai_ng_icp2][1L], "\n", sep = "")

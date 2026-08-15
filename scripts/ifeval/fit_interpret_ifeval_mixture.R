@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 
-# Fit and interpret the selected OpenEval independent-mixture probit factor model.
+# Fit and interpret a selected IFEval independent-mixture probit factor model.
 #
 # Input:
 #   openeval_binary_matrix_complete_nonconstant.csv
@@ -10,7 +10,9 @@
 #   X_ij | f_i ~ Bernoulli(Phi(alpha_j + lambda_j' f_i))
 #   f_ih      ~ independent G-component Gaussian mixture
 #
-# This reproducible copy defaults to the IFEval H=3, G=3 analysis.
+# Defaults can be overridden with H_FIXED, G_FIXED, and
+# REFINEMENT_LAMBDA_L1_PENALTY.  G_FIXED may be scalar or a comma-separated
+# length-H vector such as 3,3,1,3.
 
 options(stringsAsFactors = FALSE)
 
@@ -21,20 +23,20 @@ script_dir <- if (length(file_arg)) {
 } else {
   getwd()
 }
-bundle_root <- normalizePath(file.path(script_dir, ".."), mustWork = FALSE)
-source(file.path(script_dir, "math500_intercept_imfm_fit.R"))
+repo_root <- normalizePath(file.path(script_dir, "..", ".."), mustWork = FALSE)
+source(file.path(script_dir, "ifeval_imfm_helpers.R"))
 
 matrix_path <- Sys.getenv(
   "MATRIX_PATH",
-  file.path(bundle_root, "data", "openeval_ifeval_only_binary_matrix.csv")
+  file.path(repo_root, "data", "ifeval", "openeval_ifeval_only_binary_matrix.csv")
 )
 item_metadata_path <- Sys.getenv(
   "ITEM_METADATA_PATH",
-  file.path(bundle_root, "data", "openeval_item_metadata.csv")
+  file.path(repo_root, "data", "ifeval", "openeval_item_metadata.csv")
 )
 out_dir <- Sys.getenv(
   "OUT_DIR",
-  file.path(bundle_root, "results", "reproduced_openeval_ifeval_H3_G3_interpretation")
+  file.path(repo_root, "results", "full", "ifeval", "selected_mixture_interpretation")
 )
 parse_int_vector <- function(x, default) {
   if (is.na(x) || !nzchar(x)) return(as.integer(default))
