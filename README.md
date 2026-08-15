@@ -41,10 +41,15 @@ The IFEval analysis includes:
 - 3D factor visualizations
 - LaTeX writeup and rendered PDF in `writeup/`
 
-The current compact component-wise IFEval writeup is
-`writeup/ifeval_componentwise_G3313.pdf`. It summarizes the `H = 4`,
-`G = (3,3,1,3)` fit, representative cross-loading items, LLM ability profiles,
-the loading heatmap, marginal mixture fits, and factor-score visualizations.
+The current compact component-wise IFEval writeup is available as a rendered
+PDF and as source Markdown:
+
+- [Rendered IFEval component-wise PDF](writeup/ifeval_componentwise_G3313.pdf)
+- [IFEval component-wise Markdown source](writeup/ifeval_componentwise_G3313.md)
+
+It summarizes the `H = 4`, `G = (3,3,1,3)` fit, representative solo-loading
+and cross-loading items, joint LLM ability profiles, the loading heatmap,
+marginal mixture fits, and factor-score visualizations.
 
 The cleaned IFEval data used by the scripts live in `data/ifeval`.
 
