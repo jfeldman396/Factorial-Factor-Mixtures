@@ -42,18 +42,32 @@ The fitted component sizes were:
 | F3 | 122 |
 | F4 | 20 / 50 / 52 |
 
+## LLM Scores and Mixture Profiles
+
+The next two plots show the fitted LLM coordinates. Models are ordered from left to right by empirical IFEval accuracy.
+
+![Refined factor scores by LLM](ifeval_componentwise_G3313_assets/llm_factor_scores_G3313_cropped.png)
+
+The continuous score heatmap shows the broad role of F1: the highest-accuracy models tend to have high F1 scores, while weaker models tend to move downward on F1. F2, F3, and F4 are less monotone in overall accuracy. They capture different styles of constraint-following rather than just "better versus worse" performance.
+
+The group heatmap translates the continuous scores into factor-wise MAP mixture assignments. F3 is intentionally a single Gaussian coordinate, so every model has group 1 on F3. F1, F2, and F4 show discrete heterogeneity: models can be strong on the broad instruction-following axis while belonging to different F2 or F4 subtypes.
+
+![MAP mixture groups by LLM](ifeval_componentwise_G3313_assets/llm_mixture_groups_G3313_cropped.png)
+
 ## Loading Matrix
 
 ![Lambda ordered by strongest factor](ifeval_componentwise_G3313_assets/lambda_ordered_by_strongest_factor_G3313.png)
 
-The heatmap is a row permutation of the fitted `500 x 4` loading matrix. For each item `j`, define
+The heatmap displays the fitted item loading matrix, `Lambda`, after permuting the 500 item rows. Each row is one IFEval item and each column is one factor. Red entries are positive loadings, blue entries are negative loadings, and white entries are near zero. Larger absolute values mean that the item's success probability changes more strongly with that factor score.
+
+The row ordering is diagnostic, not part of the fitted model. For each item `j`, define
 
 ```text
 strongest_factor_j = argmax_h |lambda_jh|
 max_abs_loading_j = max_h |lambda_jh|.
 ```
 
-Rows are sorted by `strongest_factor_j`, then by decreasing `max_abs_loading_j`. Thus, the apparent blocks are not imposed by the model; they are a diagnostic ordering of the learned loadings. The fitted structure is dominated by a broad F1 factor, with smaller private-factor blocks for F2, F3, and F4.
+Rows are sorted by `strongest_factor_j`, then by decreasing `max_abs_loading_j`. Thus, the apparent blocks are not imposed by the model; they are a visualization of the learned loading pattern. The large upper block consists of items whose strongest absolute loading is on F1. The smaller lower blocks consist of items whose strongest loading is on F2, F3, or F4. The fact that these blocks become visible after a genuine row permutation is evidence that the fitted loadings have a broad-plus-specific structure: one dominant general IFEval factor and several smaller private axes.
 
 Among active items with `|loading| > 0.1`, the strongest-factor counts are:
 
@@ -128,6 +142,24 @@ Representative high-F4 items include:
 | `ifeval_20260421T021146Z_58` | 1.213 | Answer in JSON format, with markdown ticks allowed. |
 | `ifeval_20260421T021146Z_359` | 1.207 | Use fewer than 10 sentences and end with a required sentence. |
 | `ifeval_20260421T021146Z_33` | 1.173 | Use a repeated keyword, fewer than six sentences, and highlighted text sections. |
+
+### Cross-Loading Items
+
+Some items load substantially on more than one factor. These are important because they reveal tasks that mix multiple skill demands. The table below lists examples with at least two loadings above about 0.5 in absolute value.
+
+- `ifeval_20260421T021146Z_80`: F1/F3 cross-loading, with loadings `(F1,F2,F3,F4) = (1.300, 0.198, 1.301, -0.018)`. This item asks for a 30-line poem with exact sentence and punctuation constraints, mixing broad instruction following with creative lexical/form control.
+
+- `ifeval_20260421T021146Z_269`: F1/F4 cross-loading, with loadings `(1.199, 0.000, -0.177, 1.219)`. This item requires JSON wrapping plus ordinary semantic interpretation, mixing general instruction following with structured-output formatting.
+
+- `ifeval_20260421T021146Z_502`: F1/F3 cross-loading, with loadings `(1.230, 0.000, 1.177, 0.290)`. This item asks for a riddle without commas, combining creative generation with punctuation restriction.
+
+- `ifeval_20260421T021146Z_233`: F1/F4 cross-loading, with loadings `(1.507, 0.000, 0.000, 1.151)`. This item asks the model to explain a technical concept for a casual audience and end with an exact required phrase.
+
+- `ifeval_20260421T021146Z_58`: F1/F4 cross-loading, with loadings `(1.027, 0.089, -0.136, 1.213)`. This item asks for a history answer wrapped in JSON, again mixing content generation with rigid structured output.
+
+- `ifeval_20260421T021146Z_343`: F1/F3 cross-loading, with loadings `(1.235, 0.068, 1.016, 0.194)`. This is a comma-avoidance task, where the response must satisfy both content and lexical-control constraints.
+
+These cross-loadings are also visible in the heatmap: many F2-F4-primary rows retain moderate F1 loadings, and many F1-primary rows show secondary structure in F3 or F4. This is why the matrix is not a pure block diagonal matrix. It is closer to a broad general factor with smaller partially overlapping specialized factors.
 
 ## Working Interpretation
 
