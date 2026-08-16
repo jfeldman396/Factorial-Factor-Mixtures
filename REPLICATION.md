@@ -338,6 +338,12 @@ standard-Gaussian coordinate can be included is:
 Rscript scripts/sample_size/run_gaussian_coordinate_parallel_gain_ours_MAP_intercepts.R
 ```
 
+Compact outputs from this check are tracked in:
+
+- `results/selected_tables/sample_size/gaussian_coordinate_recovery_timing_summary.csv`;
+- `results/selected_tables/sample_size/gaussian_coordinate_speedup_summary.csv`;
+- `results/selected_plots/sample_size/gaussian_coordinate_parallel_gain_timing.png`.
+
 ### Refresh Checkpoint Plots
 
 For the main full run:
