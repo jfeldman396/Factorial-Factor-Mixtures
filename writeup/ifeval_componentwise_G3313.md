@@ -76,7 +76,7 @@ The marginal factor coordinates give a more nuanced model profile than overall a
 
 ## Loading Matrix
 
-![Lambda ordered by strongest factor](ifeval_componentwise_G3313_assets/lambda_ordered_by_strongest_factor_G3313.png)
+![Lambda ordered by strongest factor](ifeval_componentwise_G3313_assets/openeval_lambda_full_ordered_by_strongest_factor.png)
 
 The heatmap displays the fitted item loading matrix, `Lambda`, after permuting the 500 item rows. Each row is one IFEval item and each column is one factor. Red entries are positive loadings, blue entries are negative loadings, and white entries are near zero. Larger absolute values mean that the item's success probability changes more strongly with that factor score.
 
@@ -88,6 +88,14 @@ max_abs_loading_j = max_h |lambda_jh|.
 ```
 
 Rows are sorted by `strongest_factor_j`, then by decreasing `max_abs_loading_j`. Thus, the apparent blocks are not imposed by the model; they are a visualization of the learned loading pattern. The large upper block consists of items whose strongest absolute loading is on F1. The smaller lower blocks consist of items whose strongest loading is on F2, F3, or F4. The fact that these blocks become visible after a genuine row permutation is evidence that the fitted loadings have a broad-plus-specific structure: one dominant general IFEval factor and several smaller private axes.
+
+The heatmap above is rendered directly from the loading matrix, without interpolation. The first row in the displayed F2 block is the first F2-strongest item after sorting by decreasing maximum absolute loading. Some rows inside a factor block can still look pale because the global color scale is shared across all 500 items and all four factors. In other words, a row can be assigned to the F2 block because its F2 loading is the largest loading in that row, even if all four loadings are modest on the global scale.
+
+The two diagnostic plots below isolate this issue. The first zooms in on the F2-strongest block and labels each row by item id and maximum absolute loading. The second plots the exact loading values for the cleanest F2 examples and the weakest F2-strongest examples.
+
+![Zoomed F2 strongest block](ifeval_componentwise_G3313_assets/openeval_lambda_F2_block_zoom.png)
+
+![Exact F2 loading values](ifeval_componentwise_G3313_assets/openeval_lambda_F2_clean_vs_weak_dotplot.png)
 
 Among active items with `|loading| > 0.1`, the strongest-factor counts are:
 
