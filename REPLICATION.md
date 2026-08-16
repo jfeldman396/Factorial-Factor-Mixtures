@@ -318,6 +318,25 @@ Initial focused timings with `H=3`, `G=(3,3,1)`, `p=500`, `n in {100,500}`,
 and three repetitions showed about a `2.2x` speedup for the proposed method
 using four workers, while the current Gibbs parallel path was slower than
 serial because serial Gibbs steps plus fork/data-copy overhead dominated.
+On the same focused benchmark, using 18 workers reduced the proposed method's
+mean elapsed time from about `9.5` to `2.2` seconds at `n=100`, and from about
+`43.5` to `8.8` seconds at `n=500`. The Gibbs sampler was slower with 18
+workers. For the full sample-size study, the recommended timing configuration
+is therefore:
+
+```sh
+PARALLEL_OURS=TRUE \
+PARALLEL_GIBBS=FALSE \
+PARALLEL_WORKERS=18 \
+Rscript scripts/sample_size/compare_original_simulation_joint_mfa_gibbs.R
+```
+
+The Gaussian-coordinate timing/recovery check used to verify that one
+standard-Gaussian coordinate can be included is:
+
+```sh
+Rscript scripts/sample_size/run_gaussian_coordinate_parallel_gain_ours_MAP_intercepts.R
+```
 
 ### Refresh Checkpoint Plots
 

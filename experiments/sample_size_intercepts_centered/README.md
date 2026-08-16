@@ -123,3 +123,25 @@ Rscript scripts/sample_size/run_parallel_runtime_comparison_MAP_intercepts.R
 For clean timing comparisons, avoid running other large simulations at the same
 time, because shared CPU and memory pressure will contaminate elapsed-time
 measurements.
+
+The current recommended configuration for the full sample-size study is to
+parallelize only the proposed method:
+
+```sh
+PARALLEL_OURS=TRUE \
+PARALLEL_GIBBS=FALSE \
+PARALLEL_WORKERS=18 \
+Rscript scripts/sample_size/compare_original_simulation_joint_mfa_gibbs.R
+```
+
+This reflects the focused benchmark result: 18 workers substantially sped up
+the proposed method, but slowed the Gibbs comparator because the serial MCMC
+steps and worker communication overhead dominated the conditionally independent
+Gaussian draws.
+
+To run the focused Gaussian-coordinate check with `H=4`, `n=1000`, `p=500`,
+25 repetitions, and component configurations `G=(2,2,2,1)` and `G=(3,3,3,1)`:
+
+```sh
+Rscript scripts/sample_size/run_gaussian_coordinate_parallel_gain_ours_MAP_intercepts.R
+```
