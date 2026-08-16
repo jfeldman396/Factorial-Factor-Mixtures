@@ -37,6 +37,23 @@ split_csv <- function(x) {
 
 parse_int_csv <- function(x) as.integer(split_csv(x))
 parse_num_csv <- function(x) as.numeric(split_csv(x))
+parse_g_count_string <- function(x) parse_int_csv(gsub("-", ",", x, fixed = TRUE))
+
+parse_g_configs <- function(x) {
+  configs <- trimws(strsplit(x, ";", fixed = TRUE)[[1L]])
+  configs <- configs[nzchar(configs)]
+  lapply(configs, parse_int_csv)
+}
+
+normalize_G_counts <- function(G, H) {
+  G <- as.integer(G)
+  if (length(G) == 1L) G <- rep(G, H)
+  if (length(G) != H) stop("Each G configuration must have length 1 or length H.")
+  if (any(!is.finite(G)) || any(G < 1L)) stop("All component counts must be positive integers.")
+  G
+}
+
+format_G_config <- function(G) paste(as.integer(G), collapse = "-")
 
 parse_np_grid <- function(x) {
   parts <- split_csv(x)
@@ -59,6 +76,8 @@ seed_base <- get_env("SEED", 20260731L, as.integer)
 rep_values <- get_env("REP_VALUES", 1L, parse_int_csv)
 H_values <- get_env("H_VALUES", get_env("H_TRUE", 4L, as.integer), parse_int_csv)
 G_values <- get_env("G_VALUES", get_env("G_TRUE", 2L, as.integer), parse_int_csv)
+G_configs_env <- Sys.getenv("G_CONFIGS", unset = "")
+G_configs_input <- if (nzchar(G_configs_env)) parse_g_configs(G_configs_env) else NULL
 separations <- get_env("SEPARATIONS", 1.0, parse_num_csv)
 mixture_param_mode <- get_env("MIXTURE_PARAM_MODE", "equal", as.character)
 mixture_variance_mode <- get_env("MIXTURE_VARIANCE_MODE", "unequal", as.character)
@@ -141,51 +160,55 @@ mfa_occupied_stability_tol <- get_env("MFA_OCCUPIED_STABILITY_TOL", 1L, as.integ
 mfa_normalize_scale <- get_env("MFA_NORMALIZE_SCALE", TRUE, as.logical)
 mfa_min_scale <- get_env("MFA_MIN_SCALE", 1e-4, as.numeric)
 mfa_verbose <- get_env("MFA_VERBOSE", TRUE, as.logical)
+parallel_ours <- get_env("PARALLEL_OURS", FALSE, as.logical)
+parallel_gibbs <- get_env("PARALLEL_GIBBS", FALSE, as.logical)
+parallel_workers <- get_env("PARALLEL_WORKERS", NULL, as.integer)
 success_factor_corr <- get_env("SUCCESS_FACTOR_CORR", 0.90, as.numeric)
 success_parameter_corr <- get_env("SUCCESS_PARAMETER_CORR", 0.90, as.numeric)
 
 make_equal_mixture_params <- function(H, G, sep, variance_mode = mixture_variance_mode) {
   variance_mode <- match.arg(variance_mode, c("unequal", "equal"))
-  if (G == 2L) {
-    sd <- if (variance_mode == "unequal") c(0.25, 0.65) else c(0.35, 0.35)
-    replicate(
-      H,
-      list(pi = c(0.5, 0.5), mu = c(-sep, sep), sd = sd),
-      simplify = FALSE
-    )
-  } else if (G == 3L) {
-    sd <- if (variance_mode == "unequal") g3_raw_sd else c(0.35, 0.35, 0.35)
-    replicate(
-      H,
-      list(pi = c(0.30, 0.40, 0.30), mu = c(-sep, 0, sep), sd = sd),
-      simplify = FALSE
-    )
-  } else {
-    stop("This comparison currently supports G = 2 or G = 3.")
-  }
+  G <- normalize_G_counts(G, H)
+  lapply(seq_len(H), function(h) {
+    Gh <- G[h]
+    if (Gh == 1L) {
+      list(pi = 1, mu = 0, sd = 1)
+    } else if (Gh == 2L) {
+      sd <- if (variance_mode == "unequal") c(0.25, 0.65) else c(0.35, 0.35)
+      list(pi = c(0.5, 0.5), mu = c(-sep, sep), sd = sd)
+    } else if (Gh == 3L) {
+      sd <- if (variance_mode == "unequal") g3_raw_sd else c(0.35, 0.35, 0.35)
+      list(pi = c(0.30, 0.40, 0.30), mu = c(-sep, 0, sep), sd = sd)
+    } else {
+      stop("This comparison currently supports G_h in {1, 2, 3}.")
+    }
+  })
 }
 
 make_random_mixture_params <- function(H, G, sep, seed, variance_mode = mixture_variance_mode) {
   variance_mode <- match.arg(variance_mode, c("unequal", "equal"))
   set.seed(seed)
-  if (!G %in% c(2L, 3L)) {
-    stop("This comparison currently supports random mixtures only for G = 2 or G = 3.")
-  }
+  G <- normalize_G_counts(G, H)
 
   lapply(seq_len(H), function(h) {
-    pi_raw <- rgamma(G, shape = runif(G, 1.5, 5.0), rate = 1)
+    Gh <- G[h]
+    if (Gh == 1L) return(list(pi = 1, mu = 0, sd = 1))
+    if (!Gh %in% c(2L, 3L)) {
+      stop("This comparison currently supports random mixtures only for G_h in {1, 2, 3}.")
+    }
+    pi_raw <- rgamma(Gh, shape = runif(Gh, 1.5, 5.0), rate = 1)
     pi <- pi_raw / sum(pi_raw)
-    base_mu <- if (G == 2L) c(-sep, sep) else c(-sep, 0, sep)
-    jitter <- runif(G, -0.35 * sep, 0.35 * sep)
+    base_mu <- if (Gh == 2L) c(-sep, sep) else c(-sep, 0, sep)
+    jitter <- runif(Gh, -0.35 * sep, 0.35 * sep)
     mu <- sort(base_mu + jitter)
-    if (G > 1L) {
+    if (Gh > 1L) {
       min_gap <- 0.45 * sep
-      for (g in 2:G) {
+      for (g in 2:Gh) {
         if (mu[g] - mu[g - 1L] < min_gap) mu[g] <- mu[g - 1L] + min_gap
       }
       mu <- mu - mean(mu)
     }
-    sd <- if (variance_mode == "unequal") runif(G, 0.25, 0.70) else rep(0.35, G)
+    sd <- if (variance_mode == "unequal") runif(Gh, 0.25, 0.70) else rep(0.35, Gh)
     list(pi = pi, mu = mu, sd = sd)
   })
 }
@@ -519,18 +542,21 @@ rbind_fill <- function(x) {
 joint_class_index <- function(component, G) {
   component <- as.matrix(component)
   H <- ncol(component)
-  as.integer(1L + (component - 1L) %*% (G ^ seq.int(0L, H - 1L)))
+  G <- normalize_G_counts(G, H)
+  multipliers <- c(1L, cumprod(G[-length(G)]))
+  as.integer(1L + (component - 1L) %*% multipliers)
 }
 
 joint_profile_grid <- function(H, G) {
-  grid <- expand.grid(rep(list(seq_len(G)), H), KEEP.OUT.ATTRS = FALSE)
+  G <- normalize_G_counts(G, H)
+  grid <- expand.grid(lapply(G, seq_len), KEEP.OUT.ATTRS = FALSE)
   names(grid) <- paste0("factor_", seq_len(H), "_component")
   grid
 }
 
 true_joint_mixture_parameters <- function(mixture_params) {
   H <- length(mixture_params)
-  G <- length(mixture_params[[1L]]$pi)
+  G <- vapply(mixture_params, function(z) length(z$pi), integer(1L))
   grid <- joint_profile_grid(H, G)
   K <- nrow(grid)
   weight <- rep(1, K)
@@ -548,8 +574,12 @@ true_joint_mixture_parameters <- function(mixture_params) {
   out
 }
 
-product_joint_mixture_parameters_from_fits <- function(mixture_fits, G) {
+product_joint_mixture_parameters_from_fits <- function(mixture_fits, G = NULL) {
   H <- length(mixture_fits)
+  if (is.null(G)) {
+    G <- vapply(mixture_fits, function(z) length(z$pi), integer(1L))
+  }
+  G <- normalize_G_counts(G, H)
   grid <- joint_profile_grid(H, G)
   K <- nrow(grid)
   weight <- rep(1, K)
@@ -616,11 +646,17 @@ align_joint_mixture_parameters <- function(true_params, est_pi, est_mu, est_sig2
   dist_mat <- matrix(NA_real_, K, K)
   for (k_true in seq_len(K)) {
     for (k_est in seq_len(K)) {
-      mu_dist <- mean(((true_mu[k_true, ] - est_mu[k_est, ]) / scale_mu)^2)
-      var_dist <- mean((log_true_var[k_true, ] - log_est_var[k_est, ])^2)
-      dist_mat[k_true, k_est] <- mu_dist + 0.25 * var_dist
+      pieces <- c(true_mu[k_true, ], est_mu[k_est, ], log_true_var[k_true, ], log_est_var[k_est, ])
+      if (any(!is.finite(pieces))) {
+        dist_mat[k_true, k_est] <- 1e12
+      } else {
+        mu_dist <- mean(((true_mu[k_true, ] - est_mu[k_est, ]) / scale_mu)^2)
+        var_dist <- mean((log_true_var[k_true, ] - log_est_var[k_est, ])^2)
+        dist_mat[k_true, k_est] <- mu_dist + 0.25 * var_dist
+      }
     }
   }
+  dist_mat[!is.finite(dist_mat)] <- 1e12
 
   if (!requireNamespace("clue", quietly = TRUE)) {
     stop("Package 'clue' is required for globally optimal mixture-label alignment.")
@@ -797,7 +833,13 @@ sample_binary_Z_joint_mfa <- function(X, F, Lambda, alpha) {
   Z
 }
 
-sample_alpha_lambda_given_Z_F <- function(Z, F, tau_intercept = 5, tau_lambda = 1.5) {
+sample_alpha_lambda_given_Z_F <- function(
+    Z,
+    F,
+    tau_intercept = 5,
+    tau_lambda = 1.5,
+    parallel = FALSE,
+    workers = NULL) {
   n <- nrow(Z)
   p <- ncol(Z)
   H <- ncol(F)
@@ -807,14 +849,14 @@ sample_alpha_lambda_given_Z_F <- function(Z, F, tau_intercept = 5, tau_lambda = 
   chol_V <- chol(V)
   WtZ <- crossprod(W, Z)
 
-  alpha <- numeric(p)
-  Lambda <- matrix(NA_real_, p, H)
-  for (j in seq_len(p)) {
+  rows <- parallel_lapply(seq_len(p), function(j) {
     m <- V %*% WtZ[, j]
     beta <- as.numeric(m + t(chol_V) %*% rnorm(H + 1L))
-    alpha[j] <- beta[1L]
-    Lambda[j, ] <- beta[-1L]
-  }
+    c(alpha = beta[1L], lambda = beta[-1L])
+  }, parallel = parallel, workers = workers)
+  draw_mat <- do.call(rbind, rows)
+  alpha <- draw_mat[, 1L]
+  Lambda <- draw_mat[, -1L, drop = FALSE]
 
   list(alpha = alpha, Lambda = Lambda)
 }
@@ -872,6 +914,8 @@ fit_joint_class_probit_mfa_gibbs <- function(
     occupied_stability_tol = 1L,
     normalize_scale = TRUE,
     min_scale = 1e-4,
+    parallel = FALSE,
+    workers = NULL,
     seed = 1L,
     verbose = TRUE) {
   set.seed(seed)
@@ -918,13 +962,14 @@ fit_joint_class_probit_mfa_gibbs <- function(
 
     LtL <- crossprod(Lambda)
     Ltz <- sweep(Z, 2L, alpha, "-") %*% Lambda
-    for (i in seq_len(n)) {
+    F_rows <- parallel_lapply(seq_len(n), function(i) {
       c_i <- C[i]
       prior_prec <- diag(1 / pmax(sig2[c_i, ], min_var), H)
       V <- solve(LtL + prior_prec)
       m <- V %*% (Ltz[i, ] + prior_prec %*% mu[c_i, ])
-      F[i, ] <- rmvnorm_chol(as.numeric(m), V)
-    }
+      rmvnorm_chol(as.numeric(m), V)
+    }, parallel = parallel, workers = workers)
+    F <- do.call(rbind, F_rows)
 
     log_prob <- matrix(NA_real_, n, K)
     for (k in seq_len(K)) {
@@ -970,7 +1015,9 @@ fit_joint_class_probit_mfa_gibbs <- function(
       Z = Z,
       F = F,
       tau_intercept = tau_intercept,
-      tau_lambda = tau_lambda
+      tau_lambda = tau_lambda,
+      parallel = parallel,
+      workers = workers
     )
     alpha <- regression_draw$alpha
     Lambda <- regression_draw$Lambda
@@ -1218,6 +1265,8 @@ fit_ours <- function(X, H, G, seed) {
     stopping_objective = refine_stopping_objective,
     return_best_refinement_iteration = refine_return_best_iteration,
     refinement_selection_objective = refine_selection_objective,
+    parallel = parallel_ours,
+    workers = parallel_workers,
     seed = seed,
     verbose = FALSE
   )
@@ -1225,16 +1274,40 @@ fit_ours <- function(X, H, G, seed) {
   fit
 }
 
-design_grid <- expand.grid(
-  rep = rep_values,
-  H_true = H_values,
-  G_true = G_values,
-  np_index = seq_len(nrow(np_settings)),
-  separation = separations,
-  loading_design = loading_designs,
-  KEEP.OUT.ATTRS = FALSE,
-  stringsAsFactors = FALSE
-)
+if (!is.null(G_configs_input)) {
+  design_chunks <- lapply(H_values, function(H_value) {
+    valid_input <- Filter(function(config) length(config) %in% c(1L, H_value), G_configs_input)
+    if (!length(valid_input)) {
+      stop("No valid G_CONFIGS entry was supplied for H = ", H_value, ".")
+    }
+    valid_configs <- lapply(valid_input, normalize_G_counts, H = H_value)
+    config_labels <- vapply(valid_configs, format_G_config, character(1L))
+    unique_config_labels <- unique(config_labels)
+    expand.grid(
+      rep = rep_values,
+      H_true = H_value,
+      G_config = unique_config_labels,
+      np_index = seq_len(nrow(np_settings)),
+      separation = separations,
+      loading_design = loading_designs,
+      KEEP.OUT.ATTRS = FALSE,
+      stringsAsFactors = FALSE
+    )
+  })
+  design_grid <- do.call(rbind, design_chunks)
+  rownames(design_grid) <- NULL
+} else {
+  design_grid <- expand.grid(
+    rep = rep_values,
+    H_true = H_values,
+    G_config = as.character(G_values),
+    np_index = seq_len(nrow(np_settings)),
+    separation = separations,
+    loading_design = loading_designs,
+    KEEP.OUT.ATTRS = FALSE,
+    stringsAsFactors = FALSE
+  )
+}
 
 checkpoint_file <- file.path(out_dir, "comparison_results_checkpoint.csv")
 final_results_file <- file.path(out_dir, "comparison_results.csv")
@@ -1267,17 +1340,19 @@ for (row_idx in seq_len(nrow(design_grid))) {
   row <- design_grid[row_idx, ]
   np_row <- np_settings[row$np_index, ]
   H_scenario <- as.integer(row$H_true)
-  G_scenario <- as.integer(row$G_true)
-  K_joint <- G_scenario^H_scenario
+  G_scenario <- normalize_G_counts(parse_g_count_string(row$G_config), H_scenario)
+  G_label <- format_G_config(G_scenario)
+  K_joint <- prod(G_scenario)
   mfa_alpha_dirichlet <- if (is.finite(mfa_alpha_dirichlet_override)) {
     mfa_alpha_dirichlet_override
   } else {
     1 / max(1, K_joint)
   }
-  seed <- seed_base + 100000L * H_scenario + 50000L * G_scenario + 10000L * row$rep + 1000L * row_idx
+  seed <- seed_base + 100000L * H_scenario + 50000L * sum(G_scenario * seq_along(G_scenario)) +
+    10000L * row$rep + 1000L * row_idx
   scenario <- sprintf(
-    "rep%d_%s_n%d_p%d_H%d_G%d_sep%s",
-    row$rep, row$loading_design, np_row$n, np_row$p, H_scenario, G_scenario, row$separation
+    "rep%d_%s_n%d_p%d_H%d_G%s_sep%s",
+    row$rep, row$loading_design, np_row$n, np_row$p, H_scenario, G_label, row$separation
   )
   cat("\nScenario:", scenario, "\n")
 
@@ -1294,8 +1369,8 @@ for (row_idx in seq_len(nrow(design_grid))) {
   sim <- simulate_original_binary_probit(
     n = np_row$n,
     p = np_row$p,
-    H = H_scenario,
-    G = G_scenario,
+      H = H_scenario,
+      G = G_scenario,
     sep = row$separation,
     loading_design = row$loading_design,
     seed = seed
@@ -1346,7 +1421,8 @@ for (row_idx in seq_len(nrow(design_grid))) {
       n = np_row$n,
       p = np_row$p,
       H_true = H_scenario,
-      G_true = G_scenario,
+      G_true = G_label,
+      G_config = G_label,
       K_joint = K_joint,
       separation = row$separation,
       mixture_param_mode = mixture_param_mode,
@@ -1363,6 +1439,8 @@ for (row_idx in seq_len(nrow(design_grid))) {
       var_prior_shape = var_prior_shape,
       var_prior_scale = var_prior_scale,
       weight_prior_alpha = weight_prior_alpha,
+      parallel_enabled = parallel_ours,
+      parallel_workers = if (is.null(parallel_workers)) NA_integer_ else parallel_workers,
       ours_eval,
       ours_convergence_summary(ours),
       ours_param_recovery$summary,
@@ -1391,6 +1469,8 @@ for (row_idx in seq_len(nrow(design_grid))) {
       occupied_stability_tol = mfa_occupied_stability_tol,
       normalize_scale = mfa_normalize_scale,
       min_scale = mfa_min_scale,
+      parallel = parallel_gibbs,
+      workers = parallel_workers,
       seed = seed + 23L,
       verbose = mfa_verbose
     )
@@ -1435,7 +1515,8 @@ for (row_idx in seq_len(nrow(design_grid))) {
       n = np_row$n,
       p = np_row$p,
       H_true = H_scenario,
-      G_true = G_scenario,
+      G_true = G_label,
+      G_config = G_label,
       K_joint = K_joint,
       separation = row$separation,
       mixture_param_mode = mixture_param_mode,
@@ -1446,6 +1527,8 @@ for (row_idx in seq_len(nrow(design_grid))) {
       intercept_clip = intercept_clip,
       loading_design = row$loading_design,
       block_size_mode = block_size_mode,
+      parallel_enabled = parallel_gibbs,
+      parallel_workers = if (is.null(parallel_workers)) NA_integer_ else parallel_workers,
       mfa_eval,
       mfa_param_recovery$summary,
       mfa_all_param_recovery,
@@ -1785,12 +1868,13 @@ plot_flat_parameter_mean_sd <- function(flat_summary, out_file) {
 
   for (panel_idx in seq_len(nrow(panel_grid))) {
     H_value <- panel_grid$H_true[panel_idx]
-    G_value <- panel_grid$G_true[panel_idx]
+    G_value <- as.character(panel_grid$G_true[panel_idx])
     d_H <- flat_summary[
-      flat_summary$H_true == H_value & flat_summary$G_true == G_value,
+      flat_summary$H_true == H_value & as.character(flat_summary$G_true) == G_value,
       ,
       drop = FALSE
     ]
+    K_label <- if ("K_joint" %in% names(d_H)) d_H$K_joint[1L] else NA_integer_
     xlim <- range(d_H$n, na.rm = TRUE)
     if (diff(xlim) == 0) xlim <- xlim + c(-0.5, 0.5)
     ylim <- range(c(d_H$lower_2sd, d_H$upper_2sd, d_H$mean_flat_parameter_corr, 0, 1), na.rm = TRUE)
@@ -1801,7 +1885,7 @@ plot_flat_parameter_mean_sd <- function(flat_summary, out_file) {
       ylim = ylim,
       xlab = "n",
       ylab = "flat parameter correlation",
-      main = sprintf("H=%s, G=%s (K=%s)", H_value, G_value, G_value^H_value),
+      main = sprintf("H=%s, G=%s (K=%s)", H_value, G_value, K_label),
       log = "x",
       xaxt = "n"
     )

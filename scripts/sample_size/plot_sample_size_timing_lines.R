@@ -77,10 +77,11 @@ summarize_timing <- function(results) {
 sanitize_file_tag <- function(x) gsub("[^A-Za-z0-9]+", "_", x)
 
 plot_timing_lines <- function(summary, loading_design, H_value, G_value, block_size_mode, out_file) {
+  G_value <- as.character(G_value)
   d0 <- summary[
     summary$loading_design == loading_design &
       summary$H_true == H_value &
-      summary$G_true == G_value &
+      as.character(summary$G_true) == G_value &
       (!("block_size_mode" %in% names(summary)) | summary$block_size_mode == block_size_mode),
     ,
     drop = FALSE
@@ -119,7 +120,7 @@ plot_timing_lines <- function(summary, loading_design, H_value, G_value, block_s
     xaxt = "n",
     xlab = "n",
     ylab = "log(seconds)",
-    main = sprintf("%s | %s | H=%d, G=%d: runtime", loading_label, block_label, H_value, G_value)
+    main = sprintf("%s | %s | H=%d, G=%s: runtime", loading_label, block_label, H_value, G_value)
   )
   axis(1, at = ns, labels = ns)
   grid(col = "#E2E2E2")
@@ -181,10 +182,10 @@ out_files <- character(0)
 for (i in seq_len(nrow(panels))) {
   loading_design <- panels$loading_design[i]
   H_value <- panels$H_true[i]
-  G_value <- panels$G_true[i]
+  G_value <- as.character(panels$G_true[i])
   block_size_mode <- if ("block_size_mode" %in% names(panels)) panels$block_size_mode[i] else NA_character_
   tag_prefix <- if (is.na(block_size_mode)) "" else paste0(sanitize_file_tag(block_size_mode), "_")
-  tag <- sprintf("%s%s_H%d_G%d", tag_prefix, sanitize_file_tag(loading_design), H_value, G_value)
+  tag <- sprintf("%s%s_H%d_G%s", tag_prefix, sanitize_file_tag(loading_design), H_value, sanitize_file_tag(G_value))
   out_file <- file.path(out_dir, paste0("checkpoint_timing_log_seconds_", tag, ".png"))
   plot_timing_lines(summary, loading_design, H_value, G_value, block_size_mode, out_file)
   out_files <- c(out_files, out_file)

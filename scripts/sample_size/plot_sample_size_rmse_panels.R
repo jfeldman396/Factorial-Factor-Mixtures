@@ -126,10 +126,11 @@ summarize_metrics <- function(results, metric_names) {
 }
 
 plot_recovery_panel <- function(summary, loading_design, H_value, G_value, block_size_mode, out_file) {
+  G_value <- as.character(G_value)
   d0 <- summary[
     summary$loading_design == loading_design &
       summary$H_true == H_value &
-      summary$G_true == G_value &
+      as.character(summary$G_true) == G_value &
       (!("block_size_mode" %in% names(summary)) | summary$block_size_mode == block_size_mode),
     ,
     drop = FALSE
@@ -226,7 +227,7 @@ plot_recovery_panel <- function(summary, loading_design, H_value, G_value, block
   used_methods <- unique(d0$method)
   mtext(
     sprintf(
-      "%s | H=%d, G=%d: mean recovery metrics +/- 2 sd",
+      "%s | H=%d, G=%s: mean recovery metrics +/- 2 sd",
       paste(loading_label, block_label, sep = " | "),
       H_value,
       G_value
@@ -268,10 +269,10 @@ out_files <- character(0)
 for (i in seq_len(nrow(panels))) {
   loading_design <- panels$loading_design[i]
   H_value <- panels$H_true[i]
-  G_value <- panels$G_true[i]
+  G_value <- as.character(panels$G_true[i])
   block_size_mode <- if ("block_size_mode" %in% names(panels)) panels$block_size_mode[i] else NA_character_
   tag_prefix <- if (is.na(block_size_mode)) "" else paste0(sanitize_file_tag(block_size_mode), "_")
-  tag <- sprintf("%s%s_H%d_G%d", tag_prefix, sanitize_file_tag(loading_design), H_value, G_value)
+  tag <- sprintf("%s%s_H%d_G%s", tag_prefix, sanitize_file_tag(loading_design), H_value, sanitize_file_tag(G_value))
   out_file <- file.path(out_dir, paste0("checkpoint_parameter_recovery_panel_", tag, ".png"))
   plot_recovery_panel(summary, loading_design, H_value, G_value, block_size_mode, out_file)
   out_files <- c(out_files, out_file)

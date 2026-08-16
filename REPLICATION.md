@@ -279,6 +279,46 @@ Rscript scripts/sample_size/compare_original_simulation_joint_mfa_gibbs.R
 
 This is only a code-path check, not a scientific simulation.
 
+### Parallelization And Runtime Comparisons
+
+The simulation driver can parallelize work inside each model fit. Use:
+
+```sh
+PARALLEL_OURS=TRUE \
+PARALLEL_GIBBS=TRUE \
+PARALLEL_WORKERS=4 \
+Rscript scripts/sample_size/compare_original_simulation_joint_mfa_gibbs.R
+```
+
+For the proposed product-mixture method, this parallelizes independent
+within-iteration tasks: marginal mixture fits, rotation subproblems where
+available, itemwise loading regressions, and subject-wise MAP factor-score
+updates. The outer pretraining/refinement iterations and SVD are still serial.
+
+For the joint-mixture Gibbs comparator, this parallelizes the two largest
+conditionally independent Gaussian updates: subject factor draws across rows
+and item regression draws across columns. Sampling `Z`, profile probabilities,
+profile labels, mixture parameters, normalization, and posterior averaging
+remain serial.
+
+The focused timing launcher runs matched serial and parallel fits:
+
+```sh
+Rscript scripts/sample_size/run_parallel_runtime_comparison_MAP_intercepts.R
+```
+
+Set `PARALLEL_WORKERS` to compare worker counts, for example:
+
+```sh
+PARALLEL_WORKERS=8 \
+Rscript scripts/sample_size/run_parallel_runtime_comparison_MAP_intercepts.R
+```
+
+Initial focused timings with `H=3`, `G=(3,3,1)`, `p=500`, `n in {100,500}`,
+and three repetitions showed about a `2.2x` speedup for the proposed method
+using four workers, while the current Gibbs parallel path was slower than
+serial because serial Gibbs steps plus fork/data-copy overhead dominated.
+
 ### Refresh Checkpoint Plots
 
 For the main full run:
