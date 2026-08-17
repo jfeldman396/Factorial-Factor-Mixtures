@@ -136,6 +136,23 @@ for (n_value in n_values) {
     d_m <- d_n[d_n$method_label == method_name, ]
     d_m <- d_m[order(d_m$parallel_mode), ]
     x <- seq_len(nrow(d_m))
+    serial_y <- d_m$seconds[d_m$parallel_mode == "serial"]
+    if (length(serial_y) == 1L && is.finite(serial_y)) {
+      abline(
+        h = serial_y,
+        col = method_cols[method_name],
+        lty = 3,
+        lwd = 1.5
+      )
+      text(
+        x = 3.12,
+        y = serial_y,
+        labels = paste0("serial ", sprintf("%.1f", serial_y)),
+        pos = 3,
+        cex = 0.68,
+        col = method_cols[method_name]
+      )
+    }
     lines(
       x,
       d_m$seconds,
@@ -157,10 +174,11 @@ for (n_value in n_values) {
   if (n_value == n_values[1L]) {
     legend(
       "topleft",
-      legend = method_levels,
-      col = method_cols[method_levels],
-      pch = method_pch[method_levels],
-      lwd = 2,
+      legend = c(method_levels, "serial baseline"),
+      col = c(method_cols[method_levels], "gray35"),
+      pch = c(method_pch[method_levels], NA),
+      lty = c(1, 1, 3),
+      lwd = c(2, 2, 1.5),
       bty = "n"
     )
   }
