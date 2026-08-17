@@ -344,6 +344,19 @@ Compact outputs from this check are tracked in:
 - `results/selected_tables/sample_size/gaussian_coordinate_speedup_summary.csv`;
 - `results/selected_plots/sample_size/gaussian_coordinate_parallel_gain_timing.png`.
 
+The focused serial/parallel comparison between the product-mixture estimator
+and the joint Gibbs comparator is summarized by:
+
+```sh
+Rscript scripts/sample_size/summarize_parallel_runtime_method_comparison.R
+```
+
+The selected outputs are tracked in:
+
+- `results/selected_tables/sample_size/parallel_runtime_method_comparison_summary.csv`;
+- `results/selected_tables/sample_size/parallel_runtime_method_speedup_summary.csv`;
+- `results/selected_plots/sample_size/parallel_runtime_method_comparison.png`.
+
 ### Refresh Checkpoint Plots
 
 For the main full run:
