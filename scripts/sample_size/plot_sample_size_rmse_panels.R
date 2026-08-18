@@ -1,7 +1,8 @@
 #!/usr/bin/env Rscript
 
-# Plot parameter recovery metrics from the sample-size comparison. Most panels
-# are RMSE metrics; the factor-score panels report correlations.
+# Plot parameter recovery metrics from the sample-size comparison. Panels use
+# RMSE metrics, including a standardized factor-score RMSE derived from the
+# aligned factor-score correlations stored in the simulation checkpoint.
 # The input is the resumable comparison_results_checkpoint.csv produced by
 # compare_original_simulation_joint_mfa_gibbs.R.
 
@@ -89,17 +90,26 @@ if (nrow(weight_rmse)) {
   results$joint_weight_rmse <- results$joint_weight_l1 / sqrt(pmax(results$K_joint, 1))
 }
 
+if (!("factor_score_rmse" %in% names(results)) && "mean_factor_abs_cor" %in% names(results)) {
+  # The simulations store aligned factor-score correlations rather than all
+  # aligned score matrices.  For two standardized coordinates with correlation
+  # rho, RMSE^2 = E[(X - Y)^2] = 2(1 - rho).  This gives an RMSE-scale panel
+  # without rerunning the simulations.
+  rho <- pmin(1, pmax(0, results$mean_factor_abs_cor))
+  results$factor_score_rmse <- sqrt(2 * (1 - rho))
+}
+
 metric_labels <- c(
   alpha_rmse = "intercepts",
   lambda_rmse = "loadings",
   joint_mu_rmse = "mixture means",
   joint_var_rmse = "mixture variances",
   joint_weight_rmse = "mixture weights",
-  flat_parameter_corr = "flat factor correlation"
+  factor_score_rmse = "factor scores"
 )
 metric_labels <- metric_labels[names(metric_labels) %in% names(results)]
 
-correlation_metrics <- c("flat_parameter_corr")
+correlation_metrics <- character(0)
 
 summarize_metrics <- function(results, metric_names) {
   group_cols <- c("loading_design", "method", "H_true", "G_true", "n", "p")

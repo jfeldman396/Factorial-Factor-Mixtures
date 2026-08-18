@@ -1168,6 +1168,13 @@ evaluate_fit <- function(
   true_alpha <- if (!is.null(sim$alpha)) sim$alpha else rep(0, nrow(sim$Lambda))
   true_eta <- sweep(sim$F %*% t(sim$Lambda), 2L, true_alpha, "+")
   F_aligned <- sweep(F_hat[, align$est_index, drop = FALSE], 2L, align$signs, "*")
+  standardize_scores <- function(F) {
+    out <- scale(F)
+    out[!is.finite(out)] <- 0
+    out
+  }
+  factor_score_raw_rmse <- sqrt(mean((sim$F - F_aligned)^2))
+  factor_score_rmse <- sqrt(mean((standardize_scores(sim$F) - standardize_scores(F_aligned))^2))
   if (is.null(alpha_hat)) alpha_hat <- rep(0, nrow(Lambda_aligned))
   if (is.null(alpha_raw_hat)) alpha_raw_hat <- rep(NA_real_, length(alpha_hat))
   eta_hat <- sweep(F_aligned %*% t(Lambda_aligned), 2L, alpha_hat, "+")
@@ -1192,6 +1199,8 @@ evaluate_fit <- function(
     method = method,
     mean_factor_abs_cor = align$mean_abs_cor,
     min_factor_abs_cor = min(align$matched_abs_cor),
+    factor_score_rmse = factor_score_rmse,
+    factor_score_raw_rmse = factor_score_raw_rmse,
     lambda_corr = suppressWarnings(cor(as.vector(sim$Lambda), as.vector(Lambda_aligned))),
     lambda_rmse = sqrt(mean((sim$Lambda - Lambda_aligned)^2)),
     alpha_corr = safe_cor(true_alpha, alpha_hat),
@@ -1570,7 +1579,8 @@ summarize_results <- function(results) {
     "block_size_mode"
   )
   metric_cols <- c(
-    "mean_factor_abs_cor", "min_factor_abs_cor", "lambda_corr", "lambda_rmse",
+    "mean_factor_abs_cor", "min_factor_abs_cor", "factor_score_rmse",
+    "factor_score_raw_rmse", "lambda_corr", "lambda_rmse",
     "alpha_corr", "alpha_rmse", "alpha_raw_corr", "alpha_raw_rmse",
     "probability_rmse", "joint_profile_ari", "joint_mu_rmse", "joint_var_rmse",
     "joint_mu_corr", "joint_var_corr", "joint_weight_corr", "joint_weight_rmse",
