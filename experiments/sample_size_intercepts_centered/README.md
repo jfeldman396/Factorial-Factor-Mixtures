@@ -12,28 +12,26 @@ Post-processing uses the same alignment idea for both methods: choose the best f
 The current long run is launched by:
 
 ```sh
-Rscript scripts/sample_size/run_moderate_crossloading_sample_size_MAP_intercepts.R
-```
-
-Checkpoint plots can be regenerated with:
-
-```sh
-Rscript scripts/sample_size/plot_moderate_crossloading_checkpoint.R
+Rscript scripts/sample_size/run_sampledZ_full_pgrid_smallp_gibbs_MAP_intercepts.R
 ```
 
 Paper-facing selected plots can be regenerated from the completed checkpoint
 with:
 
 ```sh
-OUT_DIR=results/full/moderate_crossloading_joint_mfa_sample_size_p500_25reps_H3H4_G2G3_MAP_intercepts_centered \
+OUT_DIR=results/full/sampledZ_pgrid_balanced_crossloading_smallp_gibbs_MAP_intercepts \
 Rscript scripts/sample_size/plot_dgp_loading_heatmaps.R
 
-OUT_DIR=results/full/moderate_crossloading_joint_mfa_sample_size_p500_25reps_H3H4_G2G3_MAP_intercepts_centered \
+OUT_DIR=results/full/sampledZ_pgrid_balanced_crossloading_smallp_gibbs_MAP_intercepts \
 Rscript scripts/sample_size/plot_sample_size_rmse_panels.R
 
-OUT_DIR=results/full/moderate_crossloading_joint_mfa_sample_size_p500_25reps_H3H4_G2G3_MAP_intercepts_centered \
+OUT_DIR=results/full/sampledZ_pgrid_balanced_crossloading_smallp_gibbs_MAP_intercepts \
 Rscript scripts/sample_size/plot_sample_size_timing_lines.R
 ```
+
+Repeat those plotting commands with
+`OUT_DIR=results/full/sampledZ_pgrid_unbalanced_crossloading_smallp_gibbs_MAP_intercepts`
+for the moderately IFEval-like unbalanced block setting.
 
 These produce the DGP Lambda heatmaps, six-panel RMSE recovery plots, and
 `log(seconds)` timing plots for every loading/H/G setting.
@@ -104,26 +102,6 @@ initial focused timing check with `H=3`, `G=(3,3,1)`, `p=500`, `n in {100,500}`,
 and three repetitions, four workers sped up the proposed method by about `2.2x`
 but slowed the Gibbs sampler.
 
-### Focused Runtime Comparison
-
-Run a serial-versus-parallel timing comparison with:
-
-```sh
-Rscript scripts/sample_size/run_parallel_runtime_comparison_MAP_intercepts.R
-```
-
-The default script runs the same statistical setting twice, once serial and
-once with parallel flags enabled. To test a different worker count:
-
-```sh
-PARALLEL_WORKERS=8 \
-Rscript scripts/sample_size/run_parallel_runtime_comparison_MAP_intercepts.R
-```
-
-For clean timing comparisons, avoid running other large simulations at the same
-time, because shared CPU and memory pressure will contaminate elapsed-time
-measurements.
-
 The current recommended configuration for the full sample-size study is to
 parallelize only the proposed method:
 
@@ -131,17 +109,10 @@ parallelize only the proposed method:
 PARALLEL_OURS=TRUE \
 PARALLEL_GIBBS=FALSE \
 PARALLEL_WORKERS=18 \
-Rscript scripts/sample_size/compare_original_simulation_joint_mfa_gibbs.R
+Rscript scripts/sample_size/run_sampledZ_full_pgrid_smallp_gibbs_MAP_intercepts.R
 ```
 
 This reflects the focused benchmark result: 18 workers substantially sped up
 the proposed method, but slowed the Gibbs comparator because the serial MCMC
 steps and worker communication overhead dominated the conditionally independent
 Gaussian draws.
-
-To run the focused Gaussian-coordinate check with `H=4`, `n=1000`, `p=500`,
-25 repetitions, and component configurations `G=(2,2,2,1)` and `G=(3,3,3,1)`:
-
-```sh
-Rscript scripts/sample_size/run_gaussian_coordinate_parallel_gain_ours_MAP_intercepts.R
-```

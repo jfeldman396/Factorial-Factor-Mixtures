@@ -193,7 +193,7 @@ ability profiles by factor.
 
 The main simulation compares:
 
-- `independent_marginal_mixture`: the proposed method with augmented-probit SVD pretraining, independent marginal mixture rotation, item intercepts, and MAP refinement;
+- `independent_marginal_mixture`: the proposed method with sampled augmented-probit SVD pretraining, independent marginal mixture rotation, item intercepts, and MAP refinement;
 - `joint_mixture_factor_gibbs`: a correctly specified joint-mixture factor model with `G^H` latent profiles and diagonal within-profile covariance, fitted by full Gibbs sampling with probit augmentation.
 
 The main grid is:
@@ -201,50 +201,35 @@ The main grid is:
 - `H in {3, 4}`;
 - `G in {2, 3}`;
 - `n in {100, 500, 1000, 2000}`;
-- `p = 500`;
+- `p in {250, 500, 1000, 2000}`;
 - `25` Monte Carlo repetitions;
 - loading designs `balanced_moderate_few_positive_cross` and `balanced_moderate_dense_signed_cross`;
+- block-size modes `balanced` and `moderate_ifeval_like`;
 - item intercept mode `ifeval_like`;
 - unequal mixture variances;
 - proposed-method pretraining max iterations `10`;
 - proposed-method refinement max iterations `10`;
-- Gibbs iterations `2000`, burn-in `1000`, thin `1`.
+- Gibbs iterations `2000`, burn-in `1000`, thin `1`, for `p in {250, 500}` only.
 
-These settings are recorded in:
-
-```sh
-configs/sample_size_intercepts_centered.env
-```
-
-The unbalanced-block extension uses the same `H`, `G`, `n`, `p`, repetitions,
-loading designs, intercepts, and MAP/Gibbs settings, but changes
-`BLOCK_SIZE_MODE` to `moderate_ifeval_like`.  Its launcher is:
+The canonical launcher runs the balanced block grid first, then the moderately
+IFEval-like unbalanced block grid:
 
 ```sh
-Rscript scripts/sample_size/run_ifeval_blocksize_crossloading_sample_size_MAP_intercepts.R
+PARALLEL_OURS=TRUE \
+PARALLEL_GIBBS=FALSE \
+PARALLEL_WORKERS=18 \
+Rscript scripts/sample_size/run_sampledZ_full_pgrid_smallp_gibbs_MAP_intercepts.R
 ```
 
-By default, outputs go to:
+Outputs are written to:
 
 ```text
-results/full/moderate_ifeval_blocksize_crossloading_joint_mfa_sample_size_p500_25reps_H3H4_G2G3_MAP_intercepts_centered
+results/full/sampledZ_pgrid_balanced_crossloading_smallp_gibbs_MAP_intercepts
+results/full/sampledZ_pgrid_unbalanced_crossloading_smallp_gibbs_MAP_intercepts
 ```
 
-### Run The Full Simulation
-
-Run:
-
-```sh
-Rscript scripts/sample_size/run_moderate_crossloading_sample_size_MAP_intercepts.R
-```
-
-By default, outputs go to:
-
-```text
-results/full/moderate_crossloading_joint_mfa_sample_size_p500_25reps_H3H4_G2G3_MAP_intercepts_centered
-```
-
-The launcher has `RESUME_EXISTING=TRUE`, so rerunning the command resumes from existing checkpoint files rather than starting over.
+The launcher uses `RESUME_EXISTING=TRUE`, so rerunning the command resumes from
+existing checkpoint files rather than starting over.
 
 Primary outputs:
 
@@ -253,7 +238,7 @@ Primary outputs:
 - `comparison_summary.csv`;
 - `comparison_convergence.csv`;
 - per-repetition parameter-recovery CSV files;
-- Gibbs history CSV/PNG files;
+- Gibbs history CSV/PNG files for `p in {250, 500}`;
 - checkpoint/final line plots.
 
 ### Run A Smoke Test
@@ -266,7 +251,7 @@ cd "/Users/joefeldman/Documents/Deep Factor Models/factorial-factor-mixtures"
 OUT_DIR=results/full/smoke_sample_size \
 H_VALUES=3 \
 G_VALUES=2 \
-NP_GRID=n100p500:100:500 \
+NP_GRID=n100p250:100:250 \
 LOADING_DESIGNS=balanced_moderate_few_positive_cross \
 REP_VALUES=1 \
 PRETRAIN_AUG_ITER=3 \
@@ -279,15 +264,16 @@ Rscript scripts/sample_size/compare_original_simulation_joint_mfa_gibbs.R
 
 This is only a code-path check, not a scientific simulation.
 
-### Parallelization And Runtime Comparisons
+### Parallelization
 
-The simulation driver can parallelize work inside each model fit. Use:
+The current long-run recommendation is to parallelize the proposed method with
+18 workers and keep Gibbs serial:
 
 ```sh
 PARALLEL_OURS=TRUE \
-PARALLEL_GIBBS=TRUE \
-PARALLEL_WORKERS=4 \
-Rscript scripts/sample_size/compare_original_simulation_joint_mfa_gibbs.R
+PARALLEL_GIBBS=FALSE \
+PARALLEL_WORKERS=18 \
+Rscript scripts/sample_size/run_sampledZ_full_pgrid_smallp_gibbs_MAP_intercepts.R
 ```
 
 For the proposed product-mixture method, this parallelizes independent
@@ -295,119 +281,35 @@ within-iteration tasks: marginal mixture fits, rotation subproblems where
 available, itemwise loading regressions, and subject-wise MAP factor-score
 updates. The outer pretraining/refinement iterations and SVD are still serial.
 
-For the joint-mixture Gibbs comparator, this parallelizes the two largest
-conditionally independent Gaussian updates: subject factor draws across rows
-and item regression draws across columns. Sampling `Z`, profile probabilities,
-profile labels, mixture parameters, normalization, and posterior averaging
-remain serial.
-
-The focused timing launcher runs matched serial and parallel fits:
-
-```sh
-Rscript scripts/sample_size/run_parallel_runtime_comparison_MAP_intercepts.R
-```
-
-Set `PARALLEL_WORKERS` to compare worker counts, for example:
-
-```sh
-PARALLEL_WORKERS=8 \
-Rscript scripts/sample_size/run_parallel_runtime_comparison_MAP_intercepts.R
-```
-
-Initial focused timings with `H=3`, `G=(3,3,1)`, `p=500`, `n in {100,500}`,
-and three repetitions showed about a `2.2x` speedup for the proposed method
-using four workers, while the current Gibbs parallel path was slower than
-serial because serial Gibbs steps plus fork/data-copy overhead dominated.
-On the same focused benchmark, using 18 workers reduced the proposed method's
-mean elapsed time from about `9.5` to `2.2` seconds at `n=100`, and from about
-`43.5` to `8.8` seconds at `n=500`. The Gibbs sampler was slower with 18
-workers. For the full sample-size study, the recommended timing configuration
-is therefore:
-
-```sh
-PARALLEL_OURS=TRUE \
-PARALLEL_GIBBS=FALSE \
-PARALLEL_WORKERS=18 \
-Rscript scripts/sample_size/compare_original_simulation_joint_mfa_gibbs.R
-```
-
-The Gaussian-coordinate timing/recovery check used to verify that one
-standard-Gaussian coordinate can be included is:
-
-```sh
-Rscript scripts/sample_size/run_gaussian_coordinate_parallel_gain_ours_MAP_intercepts.R
-```
-
-Compact outputs from this check are tracked in:
-
-- `results/selected_tables/sample_size/gaussian_coordinate_recovery_timing_summary.csv`;
-- `results/selected_tables/sample_size/gaussian_coordinate_speedup_summary.csv`;
-- `results/selected_plots/sample_size/gaussian_coordinate_parallel_gain_timing.png`.
-
-The focused serial/parallel comparison between the product-mixture estimator
-and the joint Gibbs comparator is summarized by:
-
-```sh
-Rscript scripts/sample_size/summarize_parallel_runtime_method_comparison.R
-```
-
-The selected outputs are tracked in:
-
-- `results/selected_tables/sample_size/parallel_runtime_method_comparison_summary.csv`;
-- `results/selected_tables/sample_size/parallel_runtime_method_speedup_summary.csv`;
-- `results/selected_plots/sample_size/parallel_runtime_method_comparison.png`.
-
-### Refresh Checkpoint Plots
-
-For the main full run:
-
-```sh
-OUT_DIR=results/full/moderate_crossloading_joint_mfa_sample_size_p500_25reps_H3H4_G2G3_MAP_intercepts_centered \
-Rscript scripts/sample_size/plot_moderate_crossloading_checkpoint.R
-```
-
-Or use the refresher loop:
-
-```sh
-OUT_DIR=results/full/moderate_crossloading_joint_mfa_sample_size_p500_25reps_H3H4_G2G3_MAP_intercepts_centered \
-bash scripts/sample_size/refresh_moderate_crossloading_plots.sh
-```
-
-The plotting script produces:
-
-- flat all-parameter correlation lines;
-- lambda correlation lines;
-- joint-mixture variance correlation lines;
-- timing lines;
-- progress heatmap;
-- all-parameter panel plots by `H, G, loading_design`.
+For the joint-mixture Gibbs comparator, the implementation can parallelize
+subject factor draws and item regression draws, but focused checks found this
+slower in the current R implementation because serial MCMC steps and
+worker/data-copy overhead dominate. The full grid therefore leaves Gibbs
+serial and skips Gibbs entirely for `p > 500`.
 
 ### Regenerate Paper-Facing Sample-Size Figures
 
 The selected paper-facing simulation plots are generated from the checkpoint
 CSV and the exact DGP loading generator. Set `OUT_DIR` to the full simulation
-output directory:
+output directory you want to refresh:
 
 ```sh
-OUT_DIR=results/full/moderate_crossloading_joint_mfa_sample_size_p500_25reps_H3H4_G2G3_MAP_intercepts_centered
+OUT_DIR=results/full/sampledZ_pgrid_balanced_crossloading_smallp_gibbs_MAP_intercepts
 ```
 
-To regenerate the representative DGP loading heatmaps for
-`Loadings = "Sparse"` and `Loadings = "Cross"` at `H = 3, 4`:
+For the moderately IFEval-like unbalanced block simulation, use:
+
+```sh
+OUT_DIR=results/full/sampledZ_pgrid_unbalanced_crossloading_smallp_gibbs_MAP_intercepts
+```
+
+To regenerate representative DGP loading heatmaps for `Loadings = "Sparse"`
+and `Loadings = "Cross"` at `H = 3, 4`:
 
 ```sh
 OUT_DIR=$OUT_DIR \
 Rscript scripts/sample_size/plot_dgp_loading_heatmaps.R
 ```
-
-This writes:
-
-- `dgp_lambda_heatmap_sparse_H3.png`;
-- `dgp_lambda_heatmap_sparse_H4.png`;
-- `dgp_lambda_heatmap_cross_H3.png`;
-- `dgp_lambda_heatmap_cross_H4.png`;
-- matching `dgp_lambda_matrix_*.csv` files containing the exact representative
-  loading matrices shown in the heatmaps.
 
 To regenerate the six-panel recovery figures for each loading/H/G setting:
 
@@ -417,11 +319,11 @@ Rscript scripts/sample_size/plot_sample_size_rmse_panels.R
 ```
 
 These figures report RMSE for item intercepts, loadings, mixture means,
-mixture variances, and mixture weights, plus the flattened factor-score
-correlation. The mixture-weight RMSE is computed by vectorizing the aligned
-joint-profile weights and taking the RMSE against the true profile weights.
+mixture variances, mixture weights, and factor scores. The mixture-weight RMSE
+is computed by vectorizing the aligned joint-profile weights and taking the
+RMSE against the true profile weights.
 
-To regenerate the runtime figures:
+To regenerate runtime figures:
 
 ```sh
 OUT_DIR=$OUT_DIR \
@@ -433,36 +335,25 @@ Monte Carlo repetitions. The `seconds` field is total elapsed wall-clock time
 for each method fit; for the Gibbs comparator it includes the configured 2000
 Gibbs iterations and 1000 burn-in iterations.
 
-To refresh the committed selected copies after regenerating full outputs:
-
-```sh
-cp "$OUT_DIR"/dgp_lambda_heatmap_*.png results/selected_plots/sample_size/
-cp "$OUT_DIR"/checkpoint_parameter_recovery_panel_*.png results/selected_plots/sample_size/
-cp "$OUT_DIR"/checkpoint_timing_log_seconds_*.png results/selected_plots/sample_size/
-cp "$OUT_DIR"/dgp_lambda_matrix_*.csv results/selected_tables/sample_size/
-cp "$OUT_DIR"/checkpoint_parameter_recovery_summary.csv results/selected_tables/sample_size/
-cp "$OUT_DIR"/checkpoint_timing_log_seconds_summary.csv results/selected_tables/sample_size/
-```
-
-For the unbalanced-block simulation, use the unbalanced output directory above
-and copy the files with an `unbalanced_blocks_` prefix when preparing selected
-paper-facing snapshots.
-
 ### Interpret Simulation Metrics
 
-The main correlation metrics are computed after aligning estimated factors/loadings to the data-generating factors/loadings by best signed permutation.
+The main recovery metrics are computed after aligning estimated factors and
+loadings to the data-generating factors and loadings by best signed
+permutation.
 
 Important fields:
 
-- `factor_corr`: correlation between aligned estimated and true factor scores.
-- `lambda_corr`: correlation between aligned estimated and true loading entries.
-- `alpha_corr`: correlation between estimated and true item intercepts.
-- `mixture_mu_corr`: correlation between estimated and true marginal mixture means.
-- `mixture_var_corr`: correlation between estimated and true marginal mixture variances.
-- `flat_parameter_corr`: correlation after flattening all comparable parameter blocks into one vector.
+- `factor_score_rmse`: RMSE between aligned estimated and true factor scores.
+- `lambda_rmse`: RMSE between aligned estimated and true loading entries.
+- `alpha_rmse`: RMSE between estimated and true item intercepts.
+- `mixture_mu_rmse`: RMSE between estimated and true marginal mixture means.
+- `mixture_var_rmse`: RMSE between estimated and true marginal mixture variances.
+- `mixture_weight_rmse`: RMSE between vectorized aligned joint-profile weights.
 - `seconds`: wall-clock runtime for the method in that repetition.
 
-For `G = 3`, variance recovery can be sensitive to saturated binary item blocks, so inspect both `mixture_var_corr` and variance RMSE/parameter recovery tables.
+For `G = 3`, variance recovery can be sensitive to saturated binary item
+blocks, so inspect variance RMSE together with the generated DGP Lambda
+heatmaps and factor-score RMSE.
 
 ## Committed Selected Results
 

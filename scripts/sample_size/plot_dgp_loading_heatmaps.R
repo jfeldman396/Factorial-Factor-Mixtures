@@ -18,9 +18,9 @@ parse_int_csv <- function(x) as.integer(strsplit(x, ",", fixed = TRUE)[[1L]])
 out_dir <- get_env(
   "OUT_DIR",
   file.path(
-    "..",
     "results",
-    "moderate_crossloading_joint_mfa_sample_size_p500_25reps_H3H4_G2G3_MAP_intercepts_centered"
+    "full",
+    "sampledZ_pgrid_balanced_crossloading_smallp_gibbs_MAP_intercepts"
   ),
   as.character
 )

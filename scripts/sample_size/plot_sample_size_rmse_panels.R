@@ -1,8 +1,7 @@
 #!/usr/bin/env Rscript
 
 # Plot parameter recovery metrics from the sample-size comparison. Panels use
-# RMSE metrics, including a standardized factor-score RMSE derived from the
-# aligned factor-score correlations stored in the simulation checkpoint.
+# RMSE metrics, including factor-score RMSE from the aligned estimated scores.
 # The input is the resumable comparison_results_checkpoint.csv produced by
 # compare_original_simulation_joint_mfa_gibbs.R.
 
@@ -17,9 +16,9 @@ get_env <- function(name, default, FUN = identity) {
 out_dir <- get_env(
   "OUT_DIR",
   file.path(
-    "..",
     "results",
-    "moderate_crossloading_joint_mfa_sample_size_p500_25reps_H3H4_G2G3_MAP_intercepts_centered"
+    "full",
+    "sampledZ_pgrid_balanced_crossloading_smallp_gibbs_MAP_intercepts"
   ),
   as.character
 )
@@ -75,7 +74,7 @@ compute_weight_rmse_from_recovery_tables <- function(out_dir) {
 }
 
 weight_rmse <- compute_weight_rmse_from_recovery_tables(out_dir)
-if (nrow(weight_rmse)) {
+if (!("joint_weight_rmse" %in% names(results)) && nrow(weight_rmse)) {
   results <- merge(
     results,
     weight_rmse,

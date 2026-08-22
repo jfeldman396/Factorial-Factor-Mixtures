@@ -397,7 +397,7 @@ fit_binary_probit_pretraining_intercept <- function(
     H_max = min(10L, nrow(as.matrix(X)) - 1L, ncol(as.matrix(X))),
     G_fixed = 3L,
     n_aug_iter = 8L,
-    z_update = c("expectation", "sample"),
+    z_update = c("sample", "expectation"),
     n_random_starts = 1L,
     max_outer = 4L,
     n_mix_starts = 3L,

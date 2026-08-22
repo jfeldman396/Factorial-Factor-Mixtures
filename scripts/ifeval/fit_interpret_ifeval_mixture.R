@@ -285,6 +285,10 @@ model_id <- rownames(X)
 n_aug_iter <- as.integer(Sys.getenv("PRETRAIN_AUG_ITER", "8"))
 n_refine_iter <- as.integer(Sys.getenv("REFINE_ITER", "8"))
 mixture_max_iter <- as.integer(Sys.getenv("MIXTURE_MAX_ITER", "20"))
+z_update <- Sys.getenv("PRETRAIN_Z_UPDATE", "sample")
+if (!z_update %in% c("sample", "expectation")) {
+  stop("PRETRAIN_Z_UPDATE must be either 'sample' or 'expectation'.")
+}
 
 t0 <- proc.time()[["elapsed"]]
 pre <- fit_binary_probit_pretraining_intercept(
@@ -292,7 +296,7 @@ pre <- fit_binary_probit_pretraining_intercept(
   H = H_fixed,
   G_fixed = G_fixed,
   n_aug_iter = n_aug_iter,
-  z_update = "expectation",
+  z_update = z_update,
   n_random_starts = 1L,
   max_outer = 4L,
   n_mix_starts = 3L,

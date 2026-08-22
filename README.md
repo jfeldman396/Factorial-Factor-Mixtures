@@ -20,15 +20,17 @@ The active sample-size experiment uses:
 - `H in {3, 4}`
 - `G in {2, 3}`
 - `n in {100, 500, 1000, 2000}`
-- `p = 500`
+- `p in {250, 500, 1000, 2000}`
 - `25` Monte Carlo repetitions per setting
 - two loading designs: `few-positive-cross` and `dense-signed-cross`
+- balanced and moderately IFEval-like unbalanced item blocks
 - item intercepts generated in an IFEval-like pattern
 - centered augmented probit SVD initialization
+- sampled augmented `Z` updates during pretraining
 - MAP refinement for the proposed method
-- 2000 Gibbs iterations for the joint-mixture comparator, with 1000 burn-in draws
+- 2000 Gibbs iterations for the joint-mixture comparator, with 1000 burn-in draws, only for `p in {250, 500}`
 
-Selected checkpoint plots and tables are stored in `results/selected_plots/sample_size` and `results/selected_tables/sample_size`.
+Selected design heatmaps and current p-grid snapshots are stored in `results/selected_plots/sample_size` and `results/selected_tables/sample_size`.
 
 ## IFEval Analysis
 

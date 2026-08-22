@@ -16,7 +16,7 @@ Scope checked:
 - Verified key replication entry points exist:
   - `scripts/ifeval/cv_ifeval_rank_lambda_models.R`;
   - `scripts/ifeval/fit_interpret_ifeval_mixture.R`;
-  - `scripts/sample_size/run_moderate_crossloading_sample_size_MAP_intercepts.R`;
+  - `scripts/sample_size/run_sampledZ_full_pgrid_smallp_gibbs_MAP_intercepts.R`;
   - `scripts/sample_size/plot_sample_size_rmse_panels.R`.
 - Smoke-tested the cleaned IFEval CV script with a tiny `H=1, G=1` two-fold run.
 - Smoke-tested the cleaned selected-fit script with a tiny `H=1, G=1` run.

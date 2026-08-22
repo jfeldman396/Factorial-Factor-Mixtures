@@ -17,23 +17,33 @@ The current scripts use base R plus common CRAN packages including `MASS`, `trun
 The active simulation launcher is:
 
 ```sh
-Rscript scripts/sample_size/run_moderate_crossloading_sample_size_MAP_intercepts.R
+Rscript scripts/sample_size/run_sampledZ_full_pgrid_smallp_gibbs_MAP_intercepts.R
 ```
 
-The plotting/checkpoint script is:
+The canonical plotting scripts are:
 
 ```sh
-Rscript scripts/sample_size/plot_moderate_crossloading_checkpoint.R
+OUT_DIR=results/full/sampledZ_pgrid_balanced_crossloading_smallp_gibbs_MAP_intercepts \
+Rscript scripts/sample_size/plot_dgp_loading_heatmaps.R
+
+OUT_DIR=results/full/sampledZ_pgrid_balanced_crossloading_smallp_gibbs_MAP_intercepts \
+Rscript scripts/sample_size/plot_sample_size_rmse_panels.R
+
+OUT_DIR=results/full/sampledZ_pgrid_balanced_crossloading_smallp_gibbs_MAP_intercepts \
+Rscript scripts/sample_size/plot_sample_size_timing_lines.R
 ```
 
-The shell refresher can be used while a long run is active:
+Use the unbalanced output directory in the same commands to refresh the
+moderately IFEval-like block-size results:
 
 ```sh
-OUT_DIR=results/moderate_crossloading_joint_mfa_sample_size_p500_25reps_H3H4_G2G3_MAP_intercepts_centered \
-  bash scripts/sample_size/refresh_moderate_crossloading_plots.sh
+OUT_DIR=results/full/sampledZ_pgrid_unbalanced_crossloading_smallp_gibbs_MAP_intercepts
 ```
 
-Important settings are also recorded in `configs/sample_size_intercepts_centered.env`.
+The main launcher uses sampled augmented `Z` pretraining, MAP refinement,
+`p in {250,500,1000,2000}`, and runs the Gibbs comparator only for
+`p in {250,500}`. Important settings are also recorded in
+`configs/sample_size_intercepts_centered.env`.
 
 ## IFEval Analysis
 

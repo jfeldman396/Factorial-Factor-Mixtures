@@ -19,6 +19,7 @@ options(stringsAsFactors = FALSE)
 
 file_arg <- commandArgs(FALSE)
 file_arg <- sub("^--file=", "", file_arg[grepl("^--file=", file_arg)])
+file_arg <- gsub("~\\+~", " ", file_arg)
 script_dir <- if (length(file_arg) > 0L) dirname(normalizePath(file_arg[1L])) else getwd()
 repo_root <- normalizePath(file.path(script_dir, "../.."))
 source(file.path(repo_root, "R", "binary_probit_pretraining.R"))
@@ -123,6 +124,10 @@ ours_convergence_summary <- function(fit) {
 }
 
 pretrain_aug_iter <- get_env("PRETRAIN_AUG_ITER", 4L, as.integer)
+pretrain_z_update <- get_env("PRETRAIN_Z_UPDATE", "sample", as.character)
+if (!pretrain_z_update %in% c("sample", "expectation")) {
+  stop("PRETRAIN_Z_UPDATE must be either 'sample' or 'expectation'.")
+}
 pretrain_min_aug_iter <- get_env("PRETRAIN_MIN_AUG_ITER", 2L, as.integer)
 pretrain_objective <- get_env("PRETRAIN_OBJECTIVE", "full_data_loglik", as.character)
 pretrain_objective_tolerance <- get_env("PRETRAIN_OBJECTIVE_TOLERANCE", NA_real_, as.numeric)
@@ -1252,7 +1257,7 @@ fit_ours <- function(X, H, G, seed) {
     H = H,
     G_fixed = G,
     n_aug_iter = pretrain_aug_iter,
-    z_update = "expectation",
+    z_update = pretrain_z_update,
     pretrain_objective = pretrain_objective,
     pretrain_objective_tolerance = pretrain_objective_tolerance,
     pretrain_objective_patience = pretrain_objective_patience,
