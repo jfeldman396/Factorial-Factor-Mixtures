@@ -2,6 +2,8 @@
 .Rhistory
 .RData
 .Rproj.user/
+__pycache__/
+*.pyc
 
 # Large/generated fitting artifacts
 *.rds

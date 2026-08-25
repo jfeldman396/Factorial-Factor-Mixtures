@@ -617,8 +617,7 @@ run_rscript_with_env <- function(script_path, env_values) {
     }
   }, add = TRUE)
   do.call(Sys.setenv, as.list(env_values))
-  script_expr <- sprintf("source(%s)", deparse(script_path))
-  status <- system2("Rscript", args = c("-e", script_expr))
+  status <- system2("Rscript", args = shQuote(script_path))
   if (!identical(status, 0L)) {
     warning("Selected-model refit returned nonzero status: ", status)
   }

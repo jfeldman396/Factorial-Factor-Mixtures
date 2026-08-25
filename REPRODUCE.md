@@ -47,10 +47,105 @@ The main launcher uses sampled augmented `Z` pretraining, MAP refinement,
 
 ## IFEval Analysis
 
+### Recreate The Analysis Matrix
+
+The fitted IFEval analysis uses `data/ifeval/openeval_ifeval_only_binary_matrix.csv`.
+This is a binary model-by-item matrix.  The entries are formed from OpenEval
+responses by extracting the numeric `ifeval_strict_accuracy` values from each
+nested score object, averaging within model-item pairs, and coding the pair as
+correct when the average score is at least `0.5`.
+
+To rebuild the source OpenEval matrix from Hugging Face, install the data
+dependencies and run:
+
+```sh
+python3 -m pip install pandas pyarrow huggingface_hub
+```
+
+```sh
+python3 scripts/data/format_openeval_binary_matrix.py \
+  --benchmarks ifeval \
+  --out-dir data/openeval_ifeval_formatted_uncapped \
+  --min-item-response-prop 0.25 \
+  --min-model-response-prop 0.25
+```
+
+If the OpenEval snapshot is already cached locally, the same command can be
+run without network access by adding:
+
+```sh
+--local-snapshot-dir "$HOME/.cache/huggingface/hub/datasets--human-centered-eval--OpenEval/snapshots/<snapshot-id>"
+```
+
+The formatter writes both response data and item provenance:
+
+```text
+data/openeval_ifeval_formatted_uncapped/openeval_binary_matrix_raw.csv
+data/openeval_ifeval_formatted_uncapped/openeval_response_long_scores.csv
+data/openeval_ifeval_formatted_uncapped/openeval_item_metadata.csv
+data/openeval_ifeval_formatted_uncapped/openeval_item_instruction_metadata_long.csv
+```
+
+`openeval_item_metadata.csv` includes the raw OpenEval item payload plus
+parsed columns for `prompt`, `instruction_ids`, `instruction_families`,
+`n_instructions`, and `instruction_kwargs`.  The long instruction metadata has
+one row per item-instruction pair, which is the table to use when relating the
+25 retained IFEval instruction ids to the lower-dimensional factor solution.
+
+Then create the model-facing IFEval matrix by starting from the full
+model-by-item matrix, selecting IFEval columns, removing low-coverage models
+and items, requiring complete item columns for the retained models, and
+retaining only nonconstant items:
+
+```sh
+OPENEVAL_FULL_MATRIX=data/openeval_ifeval_formatted_uncapped/openeval_binary_matrix_raw.csv \
+OPENEVAL_ITEM_METADATA=data/openeval_ifeval_formatted_uncapped/openeval_item_metadata.csv \
+OPENEVAL_ITEM_INSTRUCTION_METADATA=data/openeval_ifeval_formatted_uncapped/openeval_item_instruction_metadata_long.csv \
+OUT_DIR=data/ifeval \
+Rscript scripts/ifeval/create_ifeval_analysis_matrix.R
+```
+
+The currently committed uncapped build starts from `124` models and `541`
+IFEval items.  It drops `2` low-coverage models, drops `0` item columns for
+coverage or missingness after that model filter, and drops `7` all-correct
+constant item columns.  The final analysis matrix has `122` models and `534`
+retained IFEval items.  The exact counts are stored in
+`data/ifeval/ifeval_analysis_matrix_build_summary.csv`.  The retained
+`score >= 0.5` analysis metadata contains `25` unique instruction ids, `9`
+instruction families, and `820` retained item-instruction rows.
+
+To build threshold-specific matrices for IFEval strict-accuracy scores
+`score >= 0.5`, `score >= 0.75`, and `score >= 1.0`, run:
+
+```sh
+scripts/ifeval/build_ifeval_threshold_matrices.sh
+```
+
+This creates:
+
+```text
+data/ifeval_threshold_0p5
+data/ifeval_threshold_0p75
+data/ifeval_threshold_1
+```
+
+For the current OpenEval IFEval scores, `score >= 0.75` and `score >= 1.0`
+produce identical binary matrices, because the observed score values are
+`0`, `1/3`, `1/2`, `2/3`, and `1`.
+
+To run the full threshold sensitivity analysis:
+
+```sh
+scripts/ifeval/run_ifeval_threshold_analyses.sh
+```
+
+The resulting fits are written under
+`results/full/ifeval_threshold_sensitivity`.
+
 Run the full IFEval pipeline with:
 
 ```sh
-bash scripts/ifeval/run_full_analysis.sh
+zsh scripts/ifeval/run_full_analysis.sh
 ```
 
 The major steps are:

@@ -32,6 +32,12 @@ profile_cols <- grDevices::hcl.colors(length(profile_levels), palette = "Dark 3"
 point_col <- profile_cols[match(scores$profile_id, profile_levels)]
 point_cex <- 0.65 + 1.7 * (scores$accuracy - min(scores$accuracy)) /
   pmax(diff(range(scores$accuracy)), 1e-12)
+factor_cols <- grep("^factor_[0-9]+$", names(scores), value = TRUE)
+group_cols <- grep("^group_factor_[0-9]+$", names(scores), value = TRUE)
+H <- length(factor_cols)
+if (H < 1L) {
+  stop("No factor score columns found in openeval_model_factor_scores_profiles.csv")
+}
 
 project3 <- function(mat) {
   data.frame(
@@ -40,48 +46,53 @@ project3 <- function(mat) {
   )
 }
 
-F_mat <- as.matrix(scores[, paste0("factor_", 1:3)])
-xy <- project3(F_mat)
+if (H >= 3L) {
+  F_mat <- as.matrix(scores[, paste0("factor_", 1:3)])
+  xy <- project3(F_mat)
 
-png(file.path(out_dir, "ifeval_3d_factor_scatter_profiles.png"), width = 1400, height = 1000, res = 160)
-op <- par(mar = c(5, 5, 4, 9))
-plot(
-  xy$x, xy$y,
-  pch = 19,
-  col = point_col,
-  cex = point_cex,
-  xlab = "projected F1/F3",
-  ylab = "projected F2/F3",
-  main = "IFEval learned mixture factors"
-)
-abline(h = 0, v = 0, col = "gray80", lty = 3)
-legend("right", inset = c(-0.28, 0), xpd = TRUE, legend = profile_levels,
-       col = profile_cols, pch = 19, title = "profile", cex = 0.65, bty = "n")
-par(op)
-dev.off()
-
-png(file.path(out_dir, "ifeval_pairwise_factor_scatter_profiles.png"), width = 1700, height = 600, res = 160)
-op <- par(mfrow = c(1, 3), mar = c(5, 5, 4, 1))
-for (pair in list(c(1, 2), c(1, 3), c(2, 3))) {
+  png(file.path(out_dir, "ifeval_3d_factor_scatter_profiles.png"), width = 1400, height = 1000, res = 160)
+  op <- par(mar = c(5, 5, 4, 9))
   plot(
-    scores[[paste0("factor_", pair[1L])]],
-    scores[[paste0("factor_", pair[2L])]],
+    xy$x, xy$y,
     pch = 19,
     col = point_col,
     cex = point_cex,
-    xlab = paste0("F", pair[1L]),
-    ylab = paste0("F", pair[2L]),
-    main = paste0("F", pair[1L], " vs F", pair[2L])
+    xlab = "projected F1/F3",
+    ylab = "projected F2/F3",
+    main = "IFEval learned mixture factors"
   )
   abline(h = 0, v = 0, col = "gray80", lty = 3)
+  legend("right", inset = c(-0.28, 0), xpd = TRUE, legend = profile_levels,
+         col = profile_cols, pch = 19, title = "profile", cex = 0.65, bty = "n")
+  par(op)
+  dev.off()
 }
-par(op)
-dev.off()
+
+if (H >= 2L) {
+  factor_pairs <- utils::combn(seq_len(min(H, 4L)), 2L, simplify = FALSE)
+  png(file.path(out_dir, "ifeval_pairwise_factor_scatter_profiles.png"), width = 560 * length(factor_pairs), height = 600, res = 160)
+  op <- par(mfrow = c(1, length(factor_pairs)), mar = c(5, 5, 4, 1))
+  for (pair in factor_pairs) {
+    plot(
+      scores[[paste0("factor_", pair[1L])]],
+      scores[[paste0("factor_", pair[2L])]],
+      pch = 19,
+      col = point_col,
+      cex = point_cex,
+      xlab = paste0("F", pair[1L]),
+      ylab = paste0("F", pair[2L]),
+      main = paste0("F", pair[1L], " vs F", pair[2L])
+    )
+    abline(h = 0, v = 0, col = "gray80", lty = 3)
+  }
+  par(op)
+  dev.off()
+}
 
 ordered <- scores[order(scores$accuracy, decreasing = TRUE), ]
-factor_mat <- t(as.matrix(ordered[, paste0("factor_", 1:3)]))
+factor_mat <- t(as.matrix(ordered[, factor_cols]))
 colnames(factor_mat) <- ordered$model_id
-rownames(factor_mat) <- paste0("F", 1:3)
+rownames(factor_mat) <- paste0("F", seq_len(H))
 max_abs <- max(abs(factor_mat), na.rm = TRUE)
 pal <- colorRampPalette(c("#355C9A", "#F7F7F7", "#B23A48"))(101)
 
@@ -91,26 +102,26 @@ image(seq_len(ncol(factor_mat)), seq_len(nrow(factor_mat)), t(factor_mat),
       col = pal, breaks = seq(-max_abs, max_abs, length.out = 102),
       axes = FALSE, xlab = "", ylab = "factor",
       main = "IFEval factor scores by LLM, ordered by accuracy")
-axis(2, at = seq_len(3), labels = rownames(factor_mat), las = 1)
+axis(2, at = seq_len(H), labels = rownames(factor_mat), las = 1)
 axis(1, at = seq_len(ncol(factor_mat)), labels = colnames(factor_mat), las = 2, cex.axis = 0.28, tick = FALSE)
 box()
 par(op)
 dev.off()
 
-group_mat <- t(as.matrix(ordered[, paste0("group_factor_", 1:3)]))
+group_mat <- t(as.matrix(ordered[, group_cols]))
 colnames(group_mat) <- ordered$model_id
-rownames(group_mat) <- paste0("F", 1:3)
-group_cols <- colorRampPalette(c("#3B6EA8", "#F2C14E", "#9E2F44"))(max(group_mat, na.rm = TRUE))
+rownames(group_mat) <- paste0("F", seq_len(H))
+group_palette <- colorRampPalette(c("#3B6EA8", "#F2C14E", "#9E2F44"))(max(group_mat, na.rm = TRUE))
 
 png(file.path(out_dir, "ifeval_map_group_heatmap_by_llm.png"), width = 3200, height = 850, res = 180)
 op <- par(mar = c(12, 5, 4, 2))
 image(seq_len(ncol(group_mat)), seq_len(nrow(group_mat)), t(group_mat),
-      col = group_cols, breaks = seq(0.5, max(group_mat, na.rm = TRUE) + 0.5, by = 1),
+      col = group_palette, breaks = seq(0.5, max(group_mat, na.rm = TRUE) + 0.5, by = 1),
       axes = FALSE, xlab = "", ylab = "factor",
       main = "IFEval MAP mixture groups by LLM, ordered by accuracy")
-axis(2, at = seq_len(3), labels = rownames(group_mat), las = 1)
+axis(2, at = seq_len(H), labels = rownames(group_mat), las = 1)
 axis(1, at = seq_len(ncol(group_mat)), labels = colnames(group_mat), las = 2, cex.axis = 0.28, tick = FALSE)
-legend("topright", fill = group_cols, legend = paste0("group ", seq_along(group_cols)), bty = "n")
+legend("topright", fill = group_palette, legend = paste0("group ", seq_along(group_palette)), bty = "n")
 box()
 par(op)
 dev.off()

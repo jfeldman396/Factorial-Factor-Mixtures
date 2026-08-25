@@ -56,6 +56,12 @@ and cross-loading items, joint LLM ability profiles, the loading heatmap,
 marginal mixture fits, and factor-score visualizations.
 
 The cleaned IFEval data used by the scripts live in `data/ifeval`.
+The exact OpenEval-to-IFEval matrix construction is documented in
+`data/ifeval/README.md` and `REPRODUCE.md`; entries are thresholded OpenEval
+numeric scores, then the IFEval analysis retains complete, nonconstant item
+columns.  The same folder includes parsed prompt and instruction metadata for
+each retained item, including a long item-instruction table for comparing the
+25 retained IFEval instruction ids to the fitted lower-rank factors.
 
 ## Remote GitHub Repository
 

@@ -5,15 +5,24 @@
 
 options(stringsAsFactors = FALSE)
 
-fit_path <- Sys.getenv(
-  "FIT_PATH",
-  file.path(
+fit_dir <- Sys.getenv("FIT_DIR", "")
+fit_path <- Sys.getenv("FIT_PATH", "")
+if (!nzchar(fit_path) && nzchar(fit_dir)) {
+  rds_files <- list.files(fit_dir, pattern = "_fit[.]rds$", full.names = TRUE)
+  if (length(rds_files) != 1L) {
+    stop("Expected exactly one *_fit.rds in FIT_DIR, found ", length(rds_files))
+  }
+  fit_path <- rds_files
+}
+if (!nzchar(fit_path)) {
+  fit_path <- file.path(
     "results",
-    "ifeval_columnwise_G_cv_20260812",
-    "selected_mixture_H4_Gconfig3-3-3-2_lambda4_iter20_guarded_mix200",
-    "openeval_H4_G3-3-3-2_fit.rds"
+    "full",
+    "ifeval_reproduction",
+    "selected_componentwise_H4_G3313_lambda4",
+    "openeval_H4_G3-3-1-3_fit.rds"
   )
-)
+}
 out_dir <- Sys.getenv("OUT_DIR", dirname(fit_path))
 out_file <- file.path(out_dir, "openeval_factor_marginal_mixtures.png")
 
