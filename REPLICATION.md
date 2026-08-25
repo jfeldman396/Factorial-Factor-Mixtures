@@ -329,6 +329,17 @@ distinguish the two dimensions where both methods are fit: dotted lines are
 only in the full simulation and are therefore excluded from those direct
 Gibbs-vs-product panels.
 
+To regenerate the product-mixture factor-score convergence plots across `n`,
+with separate colored lines for each `p`:
+
+```sh
+Rscript scripts/sample_size/plot_factor_score_rmse_by_n_product_by_p.R
+```
+
+These figures use the committed aggregate result CSVs in
+`results/selected_tables/sample_size`, color lines by `p`, and plot
+mean factor-score RMSE with `+/- 2` standard deviations across repetitions.
+
 To regenerate runtime figures:
 
 ```sh
