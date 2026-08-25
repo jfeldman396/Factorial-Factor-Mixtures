@@ -38,6 +38,18 @@ method_labels <- c(
   independent_marginal_mixture = "product mixture",
   joint_mixture_factor_gibbs = "joint Gibbs"
 )
+p_line_types <- c(
+  `250` = 3,
+  `500` = 1,
+  `1000` = 2,
+  `2000` = 4
+)
+p_line_labels <- c(
+  `250` = "p=250",
+  `500` = "p=500",
+  `1000` = "p=1000",
+  `2000` = "p=2000"
+)
 loading_labels <- c(
   balanced_moderate_few_positive_cross = 'Loadings = "Sparse"',
   balanced_moderate_dense_signed_cross = 'Loadings = "Cross"'
@@ -145,6 +157,19 @@ plot_recovery_panel <- function(summary, loading_design, H_value, G_value, block
     drop = FALSE
   ]
   if (!nrow(d0)) return(invisible(FALSE))
+  methods_present <- unique(d0$method)
+  if (length(methods_present) > 1L) {
+    common_p <- names(which(tapply(
+      d0$method,
+      d0$p,
+      function(x) all(methods_present %in% unique(x))
+    )))
+    # Method-comparison panels should only compare sample sizes with both
+    # methods available.  In the full study this is p=250 and p=500, because
+    # the Gibbs baseline is intentionally disabled for larger p.
+    d0 <- d0[as.character(d0$p) %in% common_p, , drop = FALSE]
+  }
+  if (!nrow(d0)) return(invisible(FALSE))
   loading_label <- loading_labels[[loading_design]]
   if (is.null(loading_label)) loading_label <- loading_design
   block_label <- if (!is.na(block_size_mode) && block_size_mode %in% names(block_size_labels)) {
@@ -154,6 +179,16 @@ plot_recovery_panel <- function(summary, loading_design, H_value, G_value, block
   } else {
     "balanced blocks"
   }
+  p_values <- sort(unique(d0$p))
+  p_ltys <- p_line_types[as.character(p_values)]
+  missing_lty <- !is.finite(p_ltys)
+  if (any(missing_lty)) {
+    p_ltys[missing_lty] <- rep_len(c(1, 2, 3, 4, 5, 6), sum(missing_lty))
+  }
+  names(p_ltys) <- as.character(p_values)
+  p_labels <- p_line_labels[as.character(p_values)]
+  missing_label <- is.na(p_labels)
+  p_labels[missing_label] <- paste0("p=", p_values[missing_label])
 
   n_col <- 3L
   n_row <- ceiling(length(metric_labels) / n_col)
@@ -206,29 +241,38 @@ plot_recovery_panel <- function(summary, loading_design, H_value, G_value, block
     box()
 
     for (method in unique(d0$method)) {
-      d <- d0[d0$method == method & is.finite(d0[[mean_col]]), , drop = FALSE]
-      if (!nrow(d)) next
-      d <- d[order(d$n), , drop = FALSE]
-      col <- method_colors[[method]]
-      lines(d$n, d[[mean_col]], col = col, lwd = 2)
-      points(d$n, d[[mean_col]], col = col, pch = 16, cex = 0.95)
+      for (p_value in p_values) {
+        d <- d0[
+          d0$method == method &
+            d0$p == p_value &
+            is.finite(d0[[mean_col]]),
+          ,
+          drop = FALSE
+        ]
+        if (!nrow(d)) next
+        d <- d[order(d$n), , drop = FALSE]
+        col <- method_colors[[method]]
+        lty <- p_ltys[[as.character(p_value)]]
+        lines(d$n, d[[mean_col]], col = col, lwd = 2, lty = lty)
+        points(d$n, d[[mean_col]], col = col, pch = 16, cex = 0.95)
 
-      y_lower <- if (metric %in% correlation_metrics) {
-        pmax(ylim[1L], d[[lower_col]])
-      } else {
-        pmax(0, d[[lower_col]])
-      }
-      y_upper <- pmin(ylim[2L], d[[upper_col]])
-      has_interval <- is.finite(y_lower) & is.finite(y_upper) &
-        abs(y_upper - y_lower) > 1e-10
-      if (any(has_interval)) {
-        x <- d$n[has_interval]
-        cap_width <- x * 0.035
-        segments(x, y_lower[has_interval], x, y_upper[has_interval], col = col, lwd = 1.1)
-        segments(x - cap_width, y_lower[has_interval], x + cap_width, y_lower[has_interval],
-                 col = col, lwd = 1.1)
-        segments(x - cap_width, y_upper[has_interval], x + cap_width, y_upper[has_interval],
-                 col = col, lwd = 1.1)
+        y_lower <- if (metric %in% correlation_metrics) {
+          pmax(ylim[1L], d[[lower_col]])
+        } else {
+          pmax(0, d[[lower_col]])
+        }
+        y_upper <- pmin(ylim[2L], d[[upper_col]])
+        has_interval <- is.finite(y_lower) & is.finite(y_upper) &
+          abs(y_upper - y_lower) > 1e-10
+        if (any(has_interval)) {
+          x <- d$n[has_interval]
+          cap_width <- x * 0.035
+          segments(x, y_lower[has_interval], x, y_upper[has_interval], col = col, lwd = 1.1)
+          segments(x - cap_width, y_lower[has_interval], x + cap_width, y_lower[has_interval],
+                   col = col, lwd = 1.1)
+          segments(x - cap_width, y_upper[has_interval], x + cap_width, y_upper[has_interval],
+                   col = col, lwd = 1.1)
+        }
       }
     }
   }
@@ -252,11 +296,12 @@ plot_recovery_panel <- function(summary, loading_design, H_value, G_value, block
     xjust = 0.5,
     yjust = 0.5,
     horiz = TRUE,
-    legend = method_labels[used_methods],
-    col = method_colors[used_methods],
-    lwd = 3,
-    pch = 16,
-    pt.cex = 1.25,
+    legend = c(method_labels[used_methods], p_labels),
+    col = c(method_colors[used_methods], rep("#222222", length(p_values))),
+    lwd = c(rep(3, length(used_methods)), rep(2.4, length(p_values))),
+    lty = c(rep(1, length(used_methods)), unname(p_ltys)),
+    pch = c(rep(16, length(used_methods)), rep(NA_integer_, length(p_values))),
+    pt.cex = c(rep(1.25, length(used_methods)), rep(1, length(p_values))),
     bty = "o",
     bg = "white",
     box.col = "#555555",

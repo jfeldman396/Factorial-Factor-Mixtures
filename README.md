@@ -30,7 +30,9 @@ The active sample-size experiment uses:
 - MAP refinement for the proposed method
 - 2000 Gibbs iterations for the joint-mixture comparator, with 1000 burn-in draws, only for `p in {250, 500}`
 
-Selected design heatmaps and current p-grid snapshots are stored in `results/selected_plots/sample_size` and `results/selected_tables/sample_size`.
+Selected design heatmaps, RMSE panels, timing summaries, and aggregate raw
+result CSVs are stored in `results/selected_plots/sample_size` and
+`results/selected_tables/sample_size`.
 
 ## IFEval Analysis
 

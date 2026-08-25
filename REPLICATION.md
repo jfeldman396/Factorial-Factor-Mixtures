@@ -323,6 +323,12 @@ mixture variances, mixture weights, and factor scores. The mixture-weight RMSE
 is computed by vectorizing the aligned joint-profile weights and taking the
 RMSE against the true profile weights.
 
+For method-comparison RMSE panels, colors distinguish methods and line types
+distinguish the two dimensions where both methods are fit: dotted lines are
+`p = 250` and solid lines are `p = 500`. Larger `p` values are product-mixture
+only in the full simulation and are therefore excluded from those direct
+Gibbs-vs-product panels.
+
 To regenerate runtime figures:
 
 ```sh
@@ -361,6 +367,10 @@ Selected outputs from prior runs are committed for immediate inspection:
 
 - sample-size plots: `results/selected_plots/sample_size`;
 - sample-size tables: `results/selected_tables/sample_size`;
+- aggregate raw sample-size results:
+  `results/selected_tables/sample_size/balanced_sampledZ_pgrid_product_allp_gibbs_smallp_comparison_results.csv`
+  and
+  `results/selected_tables/sample_size/unbalanced_sampledZ_pgrid_product_allp_gibbs_smallp_comparison_results.csv`;
 - IFEval plots: `results/selected_plots/ifeval`;
 - IFEval tables: `results/selected_tables/ifeval`;
 - IFEval writeups: `writeup/ifeval_analysis_writeup.pdf` and
