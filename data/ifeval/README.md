@@ -6,7 +6,23 @@ scripts.
 ## Matrix Construction
 
 The starting point is the OpenEval response data from
-`human-centered-eval/OpenEval`.  The source formatter in
+`human-centered-eval/OpenEval`.  The raw OpenEval files are parquet shards, not
+CSV files:
+
+```text
+item/ifeval-00000-of-00001.parquet
+response/ifeval-00000-of-00004.parquet
+response/ifeval-00001-of-00004.parquet
+response/ifeval-00002-of-00004.parquet
+response/ifeval-00003-of-00004.parquet
+```
+
+Those raw parquet files and the larger intermediate formatter outputs under
+`data/openeval_ifeval_formatted_*` are intentionally not committed.  They can
+be regenerated from the scripts.  The compact committed CSVs in this folder
+are the files used by the fitting code.
+
+The source formatter in
 `scripts/data/format_openeval_binary_matrix.py` constructs a model-by-item
 matrix as follows:
 
