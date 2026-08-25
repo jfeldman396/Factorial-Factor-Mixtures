@@ -110,6 +110,41 @@ expected_Z_missing <- function(X, W, F_hat = NULL, Lambda = NULL, alpha = NULL) 
   Z
 }
 
+sample_Z_missing <- function(X, W, F_hat = NULL, Lambda = NULL, alpha = NULL, seed = NULL) {
+  if (!is.null(seed)) set.seed(seed)
+  n <- nrow(X)
+  p <- ncol(X)
+  if (is.null(F_hat)) {
+    alpha <- initialize_alpha_missing(X, W)
+    eta <- matrix(rep(alpha, each = n), n, p, dimnames = dimnames(X))
+  } else {
+    eta <- sweep(F_hat %*% t(Lambda), 2L, alpha, "+")
+  }
+
+  Z <- eta
+  for (j in seq_len(p)) {
+    obs <- W[, j]
+    if (!any(obs)) next
+    mu <- eta[obs, j]
+    y <- X[obs, j]
+    lower <- ifelse(y == 1, 0, -Inf)
+    upper <- ifelse(y == 1, Inf, 0)
+    Z[obs, j] <- rtruncnorm_binary_vec(mu, 1, lower, upper)
+  }
+  dimnames(Z) <- dimnames(X)
+  Z
+}
+
+update_Z_missing <- function(X, W, F_hat = NULL, Lambda = NULL, alpha = NULL,
+                             z_update = c("sample", "expectation"), seed = NULL) {
+  z_update <- match.arg(z_update)
+  if (z_update == "sample") {
+    sample_Z_missing(X, W, F_hat, Lambda, alpha, seed = seed)
+  } else {
+    expected_Z_missing(X, W, F_hat, Lambda, alpha)
+  }
+}
+
 binary_loglik_masked_alpha <- function(X, W, F_hat, Lambda, alpha) {
   eta <- sweep(F_hat %*% t(Lambda), 2L, alpha, "+")
   p1 <- pmax(pnorm(eta), 1e-12)
@@ -297,6 +332,7 @@ update_factor_scores_mixture_missing <- function(X, W, F_hat, Lambda, alpha,
 fit_mixture_missing_probit <- function(X, W, H, G, lambda_l1_penalty, fold,
                                        workers, seed,
                                        n_aug_iter, n_refine_iter,
+                                       z_update,
                                        loading_penalty,
                                        n_random_starts, max_outer,
                                        n_mix_starts, mixture_max_iter,
@@ -310,7 +346,14 @@ fit_mixture_missing_probit <- function(X, W, H, G, lambda_l1_penalty, fold,
   G_config <- G_config_label(G_fixed)
   set.seed(seed + 100000L * fold + 1000L * H +
              10L * G_config_seed(G_fixed) + round(lambda_l1_penalty))
-  Z <- expected_Z_missing(X, W)
+  z_update <- match.arg(z_update, c("sample", "expectation"))
+  Z <- update_Z_missing(
+    X,
+    W,
+    z_update = z_update,
+    seed = seed + 100000L * fold + 1000L * H +
+      10L * G_config_seed(G_fixed) + round(lambda_l1_penalty)
+  )
   history <- data.frame()
   current <- NULL
 
@@ -336,7 +379,16 @@ fit_mixture_missing_probit <- function(X, W, H, G, lambda_l1_penalty, fold,
       train_loglik_per_response = train_ll / sum(W),
       mixture_loglik = mixture_prior_loglik(current$F_hat, current$mixture_fits)
     ))
-    Z <- expected_Z_missing(X, W, current$F_hat, current$Lambda, current$alpha)
+    Z <- update_Z_missing(
+      X,
+      W,
+      current$F_hat,
+      current$Lambda,
+      current$alpha,
+      z_update = z_update,
+      seed = seed + 100000L * fold + 1000L * H +
+        10L * G_config_seed(G_fixed) + round(lambda_l1_penalty) + iter
+    )
   }
 
   F_hat <- current$F_hat
@@ -603,6 +655,10 @@ resume_existing <- isTRUE(tolower(Sys.getenv("RESUME_EXISTING", "TRUE")) %in% c(
 
 n_aug_iter <- as.integer(Sys.getenv("PRETRAIN_AUG_ITER", "5"))
 n_refine_iter <- as.integer(Sys.getenv("REFINE_ITER", "6"))
+pretrain_z_update <- Sys.getenv("PRETRAIN_Z_UPDATE", "sample")
+if (!pretrain_z_update %in% c("sample", "expectation")) {
+  stop("PRETRAIN_Z_UPDATE must be either 'sample' or 'expectation'.")
+}
 loading_penalty <- as.numeric(Sys.getenv("PRETRAIN_LOADING_PENALTY", "0.05"))
 n_random_starts <- as.integer(Sys.getenv("N_RANDOM_STARTS", "1"))
 max_outer <- as.integer(Sys.getenv("MAX_OUTER", "3"))
@@ -663,6 +719,7 @@ if (G_mode == "column_grid") {
 }
 message("lambda_l1 grid: ", paste(lambda_grid, collapse = ", "))
 message("Folds: ", K_folds, "; MAP refinement; workers=", workers)
+message("Pretraining Z update: ", pretrain_z_update)
 message("Output directory: ", normalizePath(out_dir, mustWork = FALSE))
 
 method_name <- "independent_mixture_probit"
@@ -710,6 +767,7 @@ for (G in G_grid) {
             seed = seed,
             n_aug_iter = n_aug_iter,
             n_refine_iter = n_refine_iter,
+            z_update = pretrain_z_update,
             loading_penalty = loading_penalty,
             n_random_starts = n_random_starts,
             max_outer = max_outer,
@@ -748,6 +806,7 @@ for (G in G_grid) {
             H = H,
             lambda_l1_penalty = lambda_l1_penalty,
             fold = fold,
+            pretrain_z_update = pretrain_z_update,
             fit$history
           )
           append_csv(hist, history_path)
@@ -817,6 +876,7 @@ if (fit_selected_after_cv) {
       WORKERS = as.character(workers),
       REFINEMENT_LAMBDA_L1_PENALTY = as.character(selected$lambda_l1_penalty),
       PRETRAIN_LOADING_PENALTY = as.character(loading_penalty),
+      PRETRAIN_Z_UPDATE = pretrain_z_update,
       PRETRAIN_AUG_ITER = as.character(n_aug_iter),
       REFINE_ITER = as.character(n_refine_iter),
       MIXTURE_MAX_ITER = as.character(mixture_max_iter),
