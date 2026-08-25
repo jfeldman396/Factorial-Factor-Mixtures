@@ -15,6 +15,9 @@ __pycache__/
 # Full simulation output directories can be regenerated from scripts.
 results/full/
 results/raw/
+data/openeval_ifeval_formatted*/
+scripts/ifeval/results/
+scripts/ifeval/Rplots.pdf
 
 # Temporary checkpoints produced while long simulations are running.
 *_checkpoint.csv
