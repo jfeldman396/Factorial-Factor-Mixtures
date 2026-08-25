@@ -6,14 +6,25 @@ ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 LOCAL_SNAPSHOT_DIR="${LOCAL_SNAPSHOT_DIR:-$HOME/.cache/huggingface/hub/datasets--human-centered-eval--OpenEval/snapshots/91a9a3a78257a4b4c04e45f5a493796f8a2966b1}"
-THRESHOLDS=(${=THRESHOLDS:-0.5 0.75 1})
+
+# Use explicit labels so that the middle threshold can be displayed as 0p67
+# while using the exact two-thirds cutoff.  A literal 0.67 cutoff would exclude
+# scores equal to 2/3 and would therefore coincide with the threshold-1 matrix.
+THRESHOLD_LABELS=(${=THRESHOLD_LABELS:-0p5 0p67 1})
+THRESHOLD_VALUES=(${=THRESHOLD_VALUES:-0.5 0.6666666666666666 1})
 MIN_ITEM_RESPONSE_PROP="${MIN_ITEM_RESPONSE_PROP:-0.25}"
 MIN_MODEL_RESPONSE_PROP="${MIN_MODEL_RESPONSE_PROP:-0.25}"
 
 cd "$ROOT"
 
-for threshold in "${THRESHOLDS[@]}"; do
-  label="${threshold//./p}"
+if [[ ${#THRESHOLD_LABELS[@]} -ne ${#THRESHOLD_VALUES[@]} ]]; then
+  echo "THRESHOLD_LABELS and THRESHOLD_VALUES must have the same length." >&2
+  exit 1
+fi
+
+for idx in {1..${#THRESHOLD_LABELS[@]}}; do
+  label="${THRESHOLD_LABELS[$idx]}"
+  threshold="${THRESHOLD_VALUES[$idx]}"
   source_dir="$ROOT/data/openeval_ifeval_formatted_threshold_${label}"
   analysis_dir="$ROOT/data/ifeval_threshold_${label}"
 

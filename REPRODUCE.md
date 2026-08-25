@@ -115,7 +115,7 @@ retained IFEval items.  The exact counts are stored in
 instruction families, and `820` retained item-instruction rows.
 
 To build threshold-specific matrices for IFEval strict-accuracy scores
-`score >= 0.5`, `score >= 0.75`, and `score >= 1.0`, run:
+`score >= 0.5`, `score >= 2/3`, and `score >= 1.0`, run:
 
 ```sh
 scripts/ifeval/build_ifeval_threshold_matrices.sh
@@ -125,13 +125,22 @@ This creates:
 
 ```text
 data/ifeval_threshold_0p5
-data/ifeval_threshold_0p75
+data/ifeval_threshold_0p67
 data/ifeval_threshold_1
 ```
 
-For the current OpenEval IFEval scores, `score >= 0.75` and `score >= 1.0`
-produce identical binary matrices, because the observed score values are
-`0`, `1/3`, `1/2`, `2/3`, and `1`.
+The `0p67` label denotes the exact two-thirds cutoff.  A literal threshold of
+`0.67` would exclude scores equal to `2/3` and would therefore produce the same
+matrix as `score >= 1.0` for this snapshot.
+
+The regenerated threshold-specific analysis matrices have the following
+dimensions:
+
+| Folder | Strict-accuracy rule | Models | Retained prompts | Mean binary score |
+| --- | --- | ---: | ---: | ---: |
+| `data/ifeval_threshold_0p5/` | `score >= 0.5` | 122 | 534 | 0.757 |
+| `data/ifeval_threshold_0p67/` | `score >= 2/3` | 122 | 538 | 0.653 |
+| `data/ifeval_threshold_1/` | `score >= 1` | 122 | 534 | 0.619 |
 
 To run the full threshold sensitivity analysis:
 

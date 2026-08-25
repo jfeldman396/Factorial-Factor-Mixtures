@@ -111,13 +111,23 @@ Threshold sensitivity versions of the same CSVs are committed in:
 
 ```text
 data/ifeval_threshold_0p5/
-data/ifeval_threshold_0p75/
+data/ifeval_threshold_0p67/
 data/ifeval_threshold_1/
 ```
 
-For the current OpenEval snapshot, the `0.75` and `1.0` threshold matrices are
-identical because the observed IFEval strict-accuracy values are
-`0`, `1/3`, `1/2`, `2/3`, and `1`.
+The `0p67` folder uses the exact two-thirds cutoff, $2/3$, but is labeled
+`0p67` for readability.  This matters because the observed IFEval
+strict-accuracy values are `0`, `1/3`, `1/2`, `2/3`, and `1`; using a literal
+decimal threshold of `0.67` would exclude scores equal to `2/3` and would
+therefore coincide with the threshold-1.0 matrix.
+
+The retained matrix sizes differ slightly by threshold:
+
+| Folder | Strict-accuracy rule | Models | Retained prompts | Mean binary score |
+| --- | --- | ---: | ---: | ---: |
+| `data/ifeval_threshold_0p5/` | `score >= 0.5` | 122 | 534 | 0.757 |
+| `data/ifeval_threshold_0p67/` | `score >= 2/3` | 122 | 538 | 0.653 |
+| `data/ifeval_threshold_1/` | `score >= 1` | 122 | 534 | 0.619 |
 
 The current compact component-wise IFEval writeup is available as a rendered
 PDF and as source Markdown:

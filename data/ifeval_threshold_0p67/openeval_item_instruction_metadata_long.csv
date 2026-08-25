@@ -45,6 +45,21 @@ Write a story about a man who is trying to get his life together. Put the name o
 "ifeval","ifeval_20260421T021146Z_113",1,"detectable_content:postscript","detectable_content","Write a rap about a new smartphone. At the end of your response add a postscript starting with P.P.S The response must contain at least 6 placeholders represented by square brackets."
 "ifeval","ifeval_20260421T021146Z_113",2,"detectable_content:number_placeholders","detectable_content","Write a rap about a new smartphone. At the end of your response add a postscript starting with P.P.S The response must contain at least 6 placeholders represented by square brackets."
 "ifeval","ifeval_20260421T021146Z_114",1,"detectable_content:postscript","detectable_content","I really love the album called Lilith. I want to introduce it to my friend Luheng. Draft an email for it. Add a postscript to your response that starts with P.S."
+"ifeval","ifeval_20260421T021146Z_115",1,"combination:repeat_prompt","combination","Write a plot for a story about two people who swap fingerprints. Include a title wrapped in double angular brackets, i.e. <<title>>. In your response please avoid using commas.
+
+First, repeat the request above word for word without change.
+Do not say any words or characters before repeating the request above.
+After you repeated the request, you can give your response next."
+"ifeval","ifeval_20260421T021146Z_115",2,"detectable_format:title","detectable_format","Write a plot for a story about two people who swap fingerprints. Include a title wrapped in double angular brackets, i.e. <<title>>. In your response please avoid using commas.
+
+First, repeat the request above word for word without change.
+Do not say any words or characters before repeating the request above.
+After you repeated the request, you can give your response next."
+"ifeval","ifeval_20260421T021146Z_115",3,"punctuation:no_comma","punctuation","Write a plot for a story about two people who swap fingerprints. Include a title wrapped in double angular brackets, i.e. <<title>>. In your response please avoid using commas.
+
+First, repeat the request above word for word without change.
+Do not say any words or characters before repeating the request above.
+After you repeated the request, you can give your response next."
 "ifeval","ifeval_20260421T021146Z_116",1,"keywords:forbidden_words","keywords","Make the sentence “The bus arrived at the station” sound more interesting. Avoid using the word “station”."
 "ifeval","ifeval_20260421T021146Z_117",1,"startend:quotation","startend","Create a 5 day itinerary for a trip to Mesa, Arizona. Wrap your entire response with double quotes and include the letter ""l"" at least 15 times."
 "ifeval","ifeval_20260421T021146Z_117",2,"keywords:letter_frequency","keywords","Create a 5 day itinerary for a trip to Mesa, Arizona. Wrap your entire response with double quotes and include the letter ""l"" at least 15 times."
@@ -528,6 +543,9 @@ Before saying anything or giving your answer, please repeat the exact entire req
 "ifeval","ifeval_20260421T021146Z_328",1,"change_case:english_lowercase","change_case","Write a song about the benefits of eating your vegetables. Please make sure it is in English and that all of the letters are lowercase."
 "ifeval","ifeval_20260421T021146Z_329",1,"change_case:english_capital","change_case","Write a rant about how an asteroid killed the dinosaurs in all capital letters and in English. End the rant with the phrase ""What would happen to human next?"" and no other words should follow this phrase."
 "ifeval","ifeval_20260421T021146Z_329",2,"startend:end_checker","startend","Write a rant about how an asteroid killed the dinosaurs in all capital letters and in English. End the rant with the phrase ""What would happen to human next?"" and no other words should follow this phrase."
+"ifeval","ifeval_20260421T021146Z_33",1,"keywords:letter_frequency","keywords","Write a template for a chat bot that takes a user's location and gives them the weather forecast. Use the letter o as a keyword in the syntax of the template. The letter o should appear at least 6 times.. Your response should contain fewer than 6 sentences. Highlight at least 2 text sections, i.e. *highlighted section*."
+"ifeval","ifeval_20260421T021146Z_33",2,"length_constraints:number_sentences","length_constraints","Write a template for a chat bot that takes a user's location and gives them the weather forecast. Use the letter o as a keyword in the syntax of the template. The letter o should appear at least 6 times.. Your response should contain fewer than 6 sentences. Highlight at least 2 text sections, i.e. *highlighted section*."
+"ifeval","ifeval_20260421T021146Z_33",3,"detectable_format:number_highlighted_sections","detectable_format","Write a template for a chat bot that takes a user's location and gives them the weather forecast. Use the letter o as a keyword in the syntax of the template. The letter o should appear at least 6 times.. Your response should contain fewer than 6 sentences. Highlight at least 2 text sections, i.e. *highlighted section*."
 "ifeval","ifeval_20260421T021146Z_330",1,"combination:repeat_prompt","combination","Write a limerick about the word ""limerick"". Make sure it is funny and includes the words ""limerick"" and ""funny"". Do not use any commas.
 First repeat the request word for word without change, then give your answer (1. do not say any words or characters before repeating the request; 2. the request you need to repeat does not include this sentence)"
 "ifeval","ifeval_20260421T021146Z_330",2,"punctuation:no_comma","punctuation","Write a limerick about the word ""limerick"". Make sure it is funny and includes the words ""limerick"" and ""funny"". Do not use any commas.
@@ -965,6 +983,15 @@ of each advertisement with Audience 1 and Audience 2, respectively. Double quote
 of each advertisement with Audience 1 and Audience 2, respectively. Double quotes should be placed around your entire response."
 "ifeval","ifeval_20260421T021146Z_454",1,"length_constraints:number_words","length_constraints","Write a riddle about a house that is not a house. Also include the answer. Your response must be at least 400 words and have a title wrapped in double angular brackets, like <<riddle>>."
 "ifeval","ifeval_20260421T021146Z_454",2,"detectable_format:title","detectable_format","Write a riddle about a house that is not a house. Also include the answer. Your response must be at least 400 words and have a title wrapped in double angular brackets, like <<riddle>>."
+"ifeval","ifeval_20260421T021146Z_455",1,"combination:repeat_prompt","combination","Is the following true? ""People use time to buy money."" Explain your answer in a way that makes it easy for kids to understand. Include the word ""farmer"". Exclude the words ""economy"", ""demand"" and ""supply"".
+
+First REPEAT the ENTIRE REQUEST ABOVE, word for word without change, then give your answer. Please do not say any words or characters before repeating the request."
+"ifeval","ifeval_20260421T021146Z_455",2,"keywords:existence","keywords","Is the following true? ""People use time to buy money."" Explain your answer in a way that makes it easy for kids to understand. Include the word ""farmer"". Exclude the words ""economy"", ""demand"" and ""supply"".
+
+First REPEAT the ENTIRE REQUEST ABOVE, word for word without change, then give your answer. Please do not say any words or characters before repeating the request."
+"ifeval","ifeval_20260421T021146Z_455",3,"keywords:forbidden_words","keywords","Is the following true? ""People use time to buy money."" Explain your answer in a way that makes it easy for kids to understand. Include the word ""farmer"". Exclude the words ""economy"", ""demand"" and ""supply"".
+
+First REPEAT the ENTIRE REQUEST ABOVE, word for word without change, then give your answer. Please do not say any words or characters before repeating the request."
 "ifeval","ifeval_20260421T021146Z_456",1,"keywords:existence","keywords","Write a riddle about embroidery that has the answer ""needle"". Include keywords 'afternoon' and 'distressed' in the response. Don't use any commas in your answer."
 "ifeval","ifeval_20260421T021146Z_456",2,"punctuation:no_comma","punctuation","Write a riddle about embroidery that has the answer ""needle"". Include keywords 'afternoon' and 'distressed' in the response. Don't use any commas in your answer."
 "ifeval","ifeval_20260421T021146Z_457",1,"change_case:english_lowercase","change_case","create a job description for a clifford blu employee who works at the cash register, and also monitors the shelves for stock level. Use the keyword 'people' and 'skills'. use only lowercase letters."
@@ -1119,6 +1146,15 @@ First repeat the entire request above word for word without change, then give yo
 "ifeval","ifeval_20260421T021146Z_522",1,"detectable_format:number_highlighted_sections","detectable_format","I need a rap that tells professionals how to get babies to sleep through the night. Your answer must contain a title, wrapped in double angular brackets, such as <<title>>. Additionally, you need to highlight at least 2 sections with markdown, i.e. *highlighted section*. Finally, at the end of your response, please explicitly add a postscript starting with P.P.S"
 "ifeval","ifeval_20260421T021146Z_522",2,"detectable_format:title","detectable_format","I need a rap that tells professionals how to get babies to sleep through the night. Your answer must contain a title, wrapped in double angular brackets, such as <<title>>. Additionally, you need to highlight at least 2 sections with markdown, i.e. *highlighted section*. Finally, at the end of your response, please explicitly add a postscript starting with P.P.S"
 "ifeval","ifeval_20260421T021146Z_522",3,"detectable_content:postscript","detectable_content","I need a rap that tells professionals how to get babies to sleep through the night. Your answer must contain a title, wrapped in double angular brackets, such as <<title>>. Additionally, you need to highlight at least 2 sections with markdown, i.e. *highlighted section*. Finally, at the end of your response, please explicitly add a postscript starting with P.P.S"
+"ifeval","ifeval_20260421T021146Z_523",1,"detectable_format:title","detectable_format","Create a resume for a military officer who served in Iraq and was later hired by a private military contractor. Make sure to include a title that is wrapped in double angular brackets, i.e. <<resume of xyz>>. Refrain from using any commas in your response.
+
+Before you respond with any word, first repeat the exact, entire request above, word for word without change."
+"ifeval","ifeval_20260421T021146Z_523",2,"combination:repeat_prompt","combination","Create a resume for a military officer who served in Iraq and was later hired by a private military contractor. Make sure to include a title that is wrapped in double angular brackets, i.e. <<resume of xyz>>. Refrain from using any commas in your response.
+
+Before you respond with any word, first repeat the exact, entire request above, word for word without change."
+"ifeval","ifeval_20260421T021146Z_523",3,"punctuation:no_comma","punctuation","Create a resume for a military officer who served in Iraq and was later hired by a private military contractor. Make sure to include a title that is wrapped in double angular brackets, i.e. <<resume of xyz>>. Refrain from using any commas in your response.
+
+Before you respond with any word, first repeat the exact, entire request above, word for word without change."
 "ifeval","ifeval_20260421T021146Z_524",1,"detectable_format:title","detectable_format","Write a song about choking on a piece of chicken in the Potomac River. Put the title in double angular brackets, i.e. <<title of my song>>."
 "ifeval","ifeval_20260421T021146Z_525",1,"detectable_format:number_highlighted_sections","detectable_format","Write a tweet that is angry about the stunning lack of Virgil van Dijk in the PFA Team of the Year. Italicize at least 2 sections in your answer with markdown, i.e. *italic text section*. Do not use commas in your response. Finish your response with this exact phrase: So what is next?"
 "ifeval","ifeval_20260421T021146Z_525",2,"punctuation:no_comma","punctuation","Write a tweet that is angry about the stunning lack of Virgil van Dijk in the PFA Team of the Year. Italicize at least 2 sections in your answer with markdown, i.e. *italic text section*. Do not use commas in your response. Finish your response with this exact phrase: So what is next?"
