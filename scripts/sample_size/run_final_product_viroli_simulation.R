@@ -64,7 +64,10 @@ override_env <- function(base, updates) {
   out
 }
 
-n_values <- as.integer(split_csv(get_env("N_VALUES", "100,200,300,400")))
+n_values_common <- get_env("N_VALUES", "100,200,300,400")
+n_values_product <- as.integer(split_csv(get_env("N_VALUES_PRODUCT", n_values_common)))
+n_values_viroli_default <- if (identical(n_values_common, "100,200,300,400")) "100,200" else n_values_common
+n_values_viroli <- as.integer(split_csv(get_env("N_VALUES_VIROLI", n_values_viroli_default)))
 p_values_product <- as.integer(split_csv(get_env("P_VALUES_PRODUCT", "500,1000,2000,4000")))
 p_values_viroli <- as.integer(split_csv(get_env("P_VALUES_VIROLI", "500,1000")))
 block_modes <- split_csv(get_env("BLOCK_SIZE_MODES", "moderate_ifeval_like"))
@@ -83,7 +86,7 @@ common_env <- c(
   H_VALUES = get_env("H_VALUES", "5,10,15,20"),
   G_VALUES = get_env("G_VALUES", "2,3"),
   SEPARATIONS = get_env("SEPARATIONS", "1,2"),
-  NP_GRID = np_grid_from_values(n_values, p_values_product),
+  NP_GRID = np_grid_from_values(n_values_product, p_values_product),
   BLOCK_SIZE_MODE = block_modes[1L],
   LOADING_DESIGNS = get_env("LOADING_DESIGNS", "balanced_moderate_dense_signed_cross"),
   LOADING_SIGN_MODE = get_env("LOADING_SIGN_MODE", "block"),
@@ -157,8 +160,9 @@ common_env <- c(
 
 cat("Final product/Viroli simulation launcher\n")
 cat("Output directory:", out_dir, "\n")
-cat("n grid:", paste(n_values, collapse = ", "), "\n")
+cat("product n grid:", paste(n_values_product, collapse = ", "), "\n")
 cat("product p grid:", paste(p_values_product, collapse = ", "), "\n")
+cat("Viroli n grid:", paste(n_values_viroli, collapse = ", "), "\n")
 cat("Viroli p grid:", paste(p_values_viroli, collapse = ", "), "\n")
 cat("H grid:", common_env[["H_VALUES"]], "\n")
 cat("G grid:", common_env[["G_VALUES"]], "\n")
@@ -168,21 +172,23 @@ cat("block mode(s):", paste(block_modes, collapse = ", "), "\n")
 
 for (block_mode in block_modes) {
   phase_env <- override_env(common_env, c(BLOCK_SIZE_MODE = block_mode))
-  run_driver(override_env(
-    phase_env,
-    c(
-    NP_GRID = np_grid_from_values(n_values, p_values_product),
-    RUN_OURS = "TRUE",
-    RUN_JOINT_MFA = "FALSE",
-    RUN_VIROLI = "FALSE"
-    )
-  ))
 
   if (length(p_values_viroli)) {
+    # Run the small shared block first so the direct method comparison is
+    # available before the product-only back end finishes.
     run_driver(override_env(
       phase_env,
       c(
-      NP_GRID = np_grid_from_values(n_values, p_values_viroli),
+      NP_GRID = np_grid_from_values(n_values_viroli, p_values_viroli),
+      RUN_OURS = "TRUE",
+      RUN_JOINT_MFA = "FALSE",
+      RUN_VIROLI = "FALSE"
+      )
+    ))
+    run_driver(override_env(
+      phase_env,
+      c(
+      NP_GRID = np_grid_from_values(n_values_viroli, p_values_viroli),
       RUN_OURS = "FALSE",
       RUN_JOINT_MFA = "FALSE",
       RUN_VIROLI = "TRUE",
@@ -193,7 +199,7 @@ for (block_mode in block_modes) {
     run_driver(override_env(
       phase_env,
       c(
-      NP_GRID = np_grid_from_values(n_values, p_values_viroli),
+      NP_GRID = np_grid_from_values(n_values_viroli, p_values_viroli),
       RUN_OURS = "FALSE",
       RUN_JOINT_MFA = "FALSE",
       RUN_VIROLI = "TRUE",
@@ -202,6 +208,18 @@ for (block_mode in block_modes) {
       )
     ))
   }
+
+  # Then resume product MAP over the full grid.  Any small-block product rows
+  # completed above are skipped by the checkpoint.
+  run_driver(override_env(
+    phase_env,
+    c(
+    NP_GRID = np_grid_from_values(n_values_product, p_values_product),
+    RUN_OURS = "TRUE",
+    RUN_JOINT_MFA = "FALSE",
+    RUN_VIROLI = "FALSE"
+    )
+  ))
 }
 
 cat("\nFinal simulation launcher completed. Checkpoint:\n")

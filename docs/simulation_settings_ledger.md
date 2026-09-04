@@ -263,7 +263,7 @@ Default design:
 ```text
 n = 100, 200, 300, 400
 p = 500, 1000, 2000, 4000 for product MAP
-p = 500, 1000 for the Viroli Gibbs baselines
+p = 500, 1000 and n = 100, 200 for the Viroli Gibbs baselines
 H = 5, 10, 15, 20
 G = 2 or 3 on every factor coordinate
 separation = 1, 2

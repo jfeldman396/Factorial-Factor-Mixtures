@@ -211,7 +211,8 @@ By default this runs:
 
 - `n in {100, 200, 300, 400}`;
 - `p in {500, 1000, 2000, 4000}` for product MAP;
-- `p in {500, 1000}` for the Viroli baselines, to control runtime;
+- `n in {100, 200}` crossed with `p in {500, 1000}` for the Viroli
+  baselines, to control runtime;
 - `H in {5, 10, 15, 20}`;
 - `G in {2, 3}`, expanded to equal component counts across factors;
 - separation values `{1, 2}`;
