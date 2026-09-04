@@ -212,3 +212,8 @@ cat("Summary:", summary_file, "\n")
 cat("Table:", latest_table_file, "\n")
 cat("Plot:", plot_file, "\n")
 print(latest_table, row.names = FALSE)
+
+fixed_h_script <- file.path(repo_root, "scripts", "sample_size", "plot_final_fixed_H_np_panels.R")
+if (file.exists(fixed_h_script) && Sys.getenv("SKIP_FIXED_H_PANELS", unset = "FALSE") != "TRUE") {
+  source(fixed_h_script, local = new.env(parent = globalenv()))
+}
