@@ -311,10 +311,13 @@ make_block_cross_loadings <- function(
     cross_factors_per_item = 2L,
     cross_loading_range = c(0.25, 0.55),
     cross_factor_mode = c("neighbor", "random")) {
+  # Legacy diagnostic generator.  The reproducible sample-size study's
+  # user-facing "Cross" design now lives in R/sample_size_dgp.R as
+  # balanced_moderate_dense_signed_cross.
   # A structured cross-loading design.  Every item has one primary loading in
-  # its assigned block plus a fixed number of cross-factor loadings.  With the
-  # default cross_factors_per_item = 2, each row loads on three factors total
-  # whenever H >= 3.
+  # its assigned block plus either a fixed number of cross-factor loadings or,
+  # if cross_factors_per_item has length two, a random item-specific number of
+  # cross-loadings sampled uniformly from that integer range.
   cross_factor_mode <- match.arg(cross_factor_mode)
   if (is.null(block_sizes)) {
     block_sizes <- rep(floor(p / H), H)
@@ -325,9 +328,19 @@ make_block_cross_loadings <- function(
 
   Lambda <- matrix(0, p, H)
   block_id <- rep(seq_len(H), times = block_sizes)
-  n_cross <- min(as.integer(cross_factors_per_item), max(0L, H - 1L))
+  cross_count_spec <- as.integer(cross_factors_per_item)
+  if (length(cross_count_spec) == 0L || any(!is.finite(cross_count_spec))) {
+    stop("cross_factors_per_item must contain one or two finite integers.")
+  }
+  if (length(cross_count_spec) == 1L) {
+    cross_count_spec <- rep(cross_count_spec, 2L)
+  } else if (length(cross_count_spec) > 2L) {
+    stop("cross_factors_per_item must be a scalar or a two-element range.")
+  }
+  cross_count_spec <- sort(pmax(cross_count_spec, 0L))
+  cross_count_spec <- pmin(cross_count_spec, max(0L, H - 1L))
 
-  neighboring_factors <- function(h) {
+  neighboring_factors <- function(h, n_cross) {
     if (H <= 1L || n_cross == 0L) return(integer(0))
     offsets <- as.vector(rbind(seq_len(H - 1L), -seq_len(H - 1L)))
     out <- integer(0)
@@ -341,12 +354,17 @@ make_block_cross_loadings <- function(
 
   for (j in seq_len(p)) {
     h <- block_id[j]
+    n_cross <- if (cross_count_spec[1L] == cross_count_spec[2L]) {
+      cross_count_spec[1L]
+    } else {
+      sample(seq(cross_count_spec[1L], cross_count_spec[2L]), 1L)
+    }
     sign_j <- if (random_signs) sample(c(-1, 1), 1L) else 1
     Lambda[j, h] <- sign_j * runif(1, primary_range[1], primary_range[2]) *
       factor_strength
 
     cross_factors <- if (cross_factor_mode == "neighbor") {
-      neighboring_factors(h)
+      neighboring_factors(h, n_cross)
     } else {
       sample(setdiff(seq_len(H), h), n_cross)
     }
@@ -530,7 +548,7 @@ fit_gmm_1d <- function(
     G = 2L,
     n_starts = 8L,
     max_iter = 20L,
-    tol = 1e-8,
+    tol = 1e-6,
     min_var = 1e-3,
     min_weight = 1e-4,
     mixture_update = c("map", "mle"),
@@ -763,6 +781,24 @@ mixture_loglik_total <- function(F, fits) {
   }, numeric(1)))
 }
 
+rotation_loading_l1 <- function(loading_basis = NULL, R = NULL) {
+  if (is.null(loading_basis) || is.null(R)) return(0)
+  sum(abs(as.matrix(loading_basis) %*% as.matrix(R)))
+}
+
+rotation_selection_score <- function(
+    F,
+    fits,
+    R = NULL,
+    loading_basis = NULL,
+    loading_l1_penalty = 0) {
+  # Optional MAP-style rotation score.  The marginal mixture likelihood favors
+  # independent-looking coordinates; the loading L1 term breaks finite-sample
+  # ties toward sparse loading orientations, matching the refinement prior.
+  mixture_loglik_total(F, fits) -
+    loading_l1_penalty * rotation_loading_l1(loading_basis, R)
+}
+
 # ----------------------------------------------------------------------------
 # Givens-rotation mixture-ICA step
 # ----------------------------------------------------------------------------
@@ -790,7 +826,15 @@ pair_rotation_matrix <- function(H, a, b, theta) {
   G
 }
 
-pair_negative_loglik <- function(theta, Fa, Fb, fit_a, fit_b) {
+pair_negative_loglik <- function(
+    theta,
+    Fa,
+    Fb,
+    fit_a,
+    fit_b,
+    La = NULL,
+    Lb = NULL,
+    loading_l1_penalty = 0) {
   # Rotate only the selected pair and score the two affected marginal mixtures.
   # All other coordinates are unchanged, so they need not be recomputed.
   ca <- cos(theta)
@@ -798,8 +842,14 @@ pair_negative_loglik <- function(theta, Fa, Fb, fit_a, fit_b) {
   Fa_new <- ca * Fa + sa * Fb
   Fb_new <- -sa * Fa + ca * Fb
 
-  -sum(log_dmix_1d(Fa_new, fit_a)) -
+  out <- -sum(log_dmix_1d(Fa_new, fit_a)) -
     sum(log_dmix_1d(Fb_new, fit_b))
+  if (!is.null(La) && !is.null(Lb) && loading_l1_penalty > 0) {
+    La_new <- ca * La + sa * Lb
+    Lb_new <- -sa * La + ca * Lb
+    out <- out + loading_l1_penalty * (sum(abs(La_new)) + sum(abs(Lb_new)))
+  }
+  out
 }
 
 optimize_pair_angle <- function(
@@ -807,6 +857,9 @@ optimize_pair_angle <- function(
     Fb,
     fit_a,
     fit_b,
+    La = NULL,
+    Lb = NULL,
+    loading_l1_penalty = 0,
     interval = c(-pi / 2, pi / 2),
     grid_size = 21L) {
   # The pairwise mixture likelihood is not guaranteed to be globally unimodal.
@@ -814,7 +867,8 @@ optimize_pair_angle <- function(
   # point.  This is cheap because it is only one-dimensional.
   grid <- seq(interval[1], interval[2], length.out = grid_size)
   values <- vapply(grid, pair_negative_loglik, numeric(1),
-                   Fa = Fa, Fb = Fb, fit_a = fit_a, fit_b = fit_b)
+                   Fa = Fa, Fb = Fb, fit_a = fit_a, fit_b = fit_b,
+                   La = La, Lb = Lb, loading_l1_penalty = loading_l1_penalty)
 
   # Restrict the local optimizer to the grid neighborhood of the best angle.
   k <- which.min(values)
@@ -833,11 +887,17 @@ optimize_pair_angle <- function(
     Fb = Fb,
     fit_a = fit_a,
     fit_b = fit_b,
+    La = La,
+    Lb = Lb,
+    loading_l1_penalty = loading_l1_penalty,
     tol = 1e-8
   )
 
   # Keep the no-rotation angle if the local optimizer does not improve it.
-  zero_value <- pair_negative_loglik(0, Fa, Fb, fit_a, fit_b)
+  zero_value <- pair_negative_loglik(
+    0, Fa, Fb, fit_a, fit_b,
+    La = La, Lb = Lb, loading_l1_penalty = loading_l1_penalty
+  )
   if (zero_value <= local$objective) {
     list(theta = 0, objective = zero_value)
   } else {
@@ -866,6 +926,8 @@ disjoint_mixture_sweep <- function(
     R,
     fits,
     grid_size = 21L,
+    loading_basis = NULL,
+    loading_l1_penalty = 0,
     pairing = c("random", "adjacent"),
     seed = NULL,
     parallel = FALSE,
@@ -877,6 +939,11 @@ disjoint_mixture_sweep <- function(
   if (H < 2L) return(list(F = F, R = R, angles = numeric(0), pairs = matrix(integer(0), ncol = 2L)))
 
   pairs <- make_disjoint_pairs(H, pairing = pairing, seed = seed)
+  Lambda_current <- if (!is.null(loading_basis) && loading_l1_penalty > 0) {
+    as.matrix(loading_basis) %*% R
+  } else {
+    NULL
+  }
   angles <- parallel_lapply(
     seq_len(nrow(pairs)),
     function(r) {
@@ -887,6 +954,9 @@ disjoint_mixture_sweep <- function(
         Fb = F[, b],
         fit_a = fits[[a]],
         fit_b = fits[[b]],
+        La = if (!is.null(Lambda_current)) Lambda_current[, a] else NULL,
+        Lb = if (!is.null(Lambda_current)) Lambda_current[, b] else NULL,
+        loading_l1_penalty = loading_l1_penalty,
         grid_size = grid_size
       )$theta
     },
@@ -961,7 +1031,14 @@ select_promising_pairs <- function(
   all_pairs[head(keep_order, max_pairs), , drop = FALSE]
 }
 
-selected_pair_mixture_sweep <- function(S, R, fits, pairs, grid_size = 21L) {
+selected_pair_mixture_sweep <- function(
+    S,
+    R,
+    fits,
+    pairs,
+    grid_size = 21L,
+    loading_basis = NULL,
+    loading_l1_penalty = 0) {
   H <- ncol(S)
   F <- S %*% R
   if (H < 2L || is.null(pairs) || nrow(pairs) == 0L) {
@@ -972,11 +1049,19 @@ selected_pair_mixture_sweep <- function(S, R, fits, pairs, grid_size = 21L) {
   for (r in seq_len(nrow(pairs))) {
     a <- pairs[r, 1L]
     b <- pairs[r, 2L]
+    Lambda_current <- if (!is.null(loading_basis) && loading_l1_penalty > 0) {
+      as.matrix(loading_basis) %*% R
+    } else {
+      NULL
+    }
     opt <- optimize_pair_angle(
       Fa = F[, a],
       Fb = F[, b],
       fit_a = fits[[a]],
       fit_b = fits[[b]],
+      La = if (!is.null(Lambda_current)) Lambda_current[, a] else NULL,
+      Lb = if (!is.null(Lambda_current)) Lambda_current[, b] else NULL,
+      loading_l1_penalty = loading_l1_penalty,
       grid_size = grid_size
     )
     theta <- opt$theta
@@ -991,7 +1076,13 @@ selected_pair_mixture_sweep <- function(S, R, fits, pairs, grid_size = 21L) {
   list(F = S %*% R, R = R, angles = angles, pairs = pairs)
 }
 
-jacobi_mixture_sweep <- function(S, R, fits, grid_size = 21L) {
+jacobi_mixture_sweep <- function(
+    S,
+    R,
+    fits,
+    grid_size = 21L,
+    loading_basis = NULL,
+    loading_l1_penalty = 0) {
   H <- ncol(S)
   F <- S %*% R
   if (H < 2L) return(list(F = F, R = R, angles = numeric(0)))
@@ -1004,6 +1095,11 @@ jacobi_mixture_sweep <- function(S, R, fits, grid_size = 21L) {
   for (r in seq_len(nrow(pairs))) {
     a <- pairs[r, 1L]
     b <- pairs[r, 2L]
+    Lambda_current <- if (!is.null(loading_basis) && loading_l1_penalty > 0) {
+      as.matrix(loading_basis) %*% R
+    } else {
+      NULL
+    }
 
     # Choose the best angle for this pair under the current marginal mixtures.
     opt <- optimize_pair_angle(
@@ -1011,6 +1107,9 @@ jacobi_mixture_sweep <- function(S, R, fits, grid_size = 21L) {
       Fb = F[, b],
       fit_a = fits[[a]],
       fit_b = fits[[b]],
+      La = if (!is.null(Lambda_current)) Lambda_current[, a] else NULL,
+      Lb = if (!is.null(Lambda_current)) Lambda_current[, b] else NULL,
+      loading_l1_penalty = loading_l1_penalty,
       grid_size = grid_size
     )
 
@@ -1027,10 +1126,75 @@ jacobi_mixture_sweep <- function(S, R, fits, grid_size = 21L) {
   list(F = S %*% R, R = R, angles = angles, pairs = pairs)
 }
 
+fastica_rotation_starts <- function(
+    S,
+    n_starts = 1L,
+    ica_functions = c("logcosh", "exp"),
+    max_iter = 200L,
+    tol = 1e-4,
+    seed = 1L,
+    verbose = FALSE) {
+  # Use an off-the-shelf ICA objective only to construct initial rotations.
+  # The selected rotation is still judged by the marginal mixture likelihood
+  # below, so this is a warm start rather than a change in target criterion.
+  if (!requireNamespace("fastICA", quietly = TRUE)) {
+    if (isTRUE(verbose)) message("  fastICA package unavailable; skipping ICA rotation starts.")
+    return(list())
+  }
+
+  S <- as.matrix(S)
+  H <- ncol(S)
+  n_starts <- max(0L, as.integer(n_starts))
+  if (H < 2L || n_starts < 1L) return(list())
+
+  ica_functions <- unique(as.character(ica_functions))
+  ica_functions <- ica_functions[ica_functions %in% c("logcosh", "exp")]
+  if (!length(ica_functions)) ica_functions <- "logcosh"
+
+  S_centered <- sweep(S, 2L, colMeans(S), "-")
+  out <- list()
+  for (fun in ica_functions) {
+    for (s in seq_len(n_starts)) {
+      set.seed(seed + 1009L * s + match(fun, c("logcosh", "exp")))
+      w_init <- random_orthogonal(H)
+      fit <- try(
+        fastICA::fastICA(
+          X = S_centered,
+          n.comp = H,
+          alg.typ = "parallel",
+          fun = fun,
+          method = "R",
+          maxit = as.integer(max_iter),
+          tol = tol,
+          verbose = FALSE,
+          w.init = w_init
+        ),
+        silent = TRUE
+      )
+      if (inherits(fit, "try-error") || is.null(fit$S)) next
+
+      Y <- sweep(as.matrix(fit$S), 2L, colMeans(fit$S), "-")
+      scales <- sqrt(colMeans(Y^2))
+      scales[!is.finite(scales) | scales <= 1e-10] <- 1
+      Y <- sweep(Y, 2L, scales, "/")
+
+      # Since S is already whitened, crossprod(S, Y) is a noisy rotation
+      # estimate.  Projecting makes the warm start exactly orthogonal.
+      R <- project_to_orthogonal(crossprod(S_centered, Y))
+      out[[paste0("fastica_", fun, "_", s)]] <- R
+    }
+  }
+  out
+}
+
 estimate_mixture_ica_unknown_G <- function(
     S,
     G_fixed = NULL,
     n_random_starts = 1L,
+    n_ica_starts = 0L,
+    ica_functions = c("logcosh", "exp"),
+    ica_max_iter = 200L,
+    ica_tol = 1e-4,
     max_outer = 4L,
     n_mix_starts = 3L,
     mixture_max_iter = 20L,
@@ -1041,12 +1205,17 @@ estimate_mixture_ica_unknown_G <- function(
     var_prior_scale = 0.3,
     weight_prior_alpha = 1,
     grid_size = 21L,
+    rotation_objective_tolerance = 1e-4,
+    rotation_min_outer = 2L,
+    require_mixture_convergence_for_rotation_stop = TRUE,
     rotation_sweep = c("full", "disjoint", "multi_disjoint", "promising", "hybrid"),
     disjoint_pairing = c("random", "adjacent"),
     n_disjoint_rounds = 4L,
     promising_max_pairs = NULL,
     promising_fraction = 0.15,
     promising_min_score = 0,
+    rotation_loading_basis = NULL,
+    rotation_loading_l1_penalty = 0,
     seed = 1L,
     parallel = FALSE,
     workers = NULL,
@@ -1059,15 +1228,34 @@ estimate_mixture_ica_unknown_G <- function(
   rotation_sweep <- match.arg(rotation_sweep)
   disjoint_pairing <- match.arg(disjoint_pairing)
   n_disjoint_rounds <- max(1L, as.integer(n_disjoint_rounds))
+  rotation_min_outer <- max(1L, as.integer(rotation_min_outer))
   workers <- resolve_workers(workers)
   set.seed(seed)
   S <- as.matrix(S)
   H <- ncol(S)
+  if (!is.null(rotation_loading_basis)) {
+    rotation_loading_basis <- as.matrix(rotation_loading_basis)
+    if (ncol(rotation_loading_basis) != H) {
+      stop("rotation_loading_basis must have one column per factor.")
+    }
+  }
+  rotation_loading_l1_penalty <- max(0, as.numeric(rotation_loading_l1_penalty))
 
   G_fixed <- normalize_G_fixed(G_fixed, H)
 
-  # Use identity plus random orthogonal starts to reduce local optimum risk.
+  # Use identity plus optional ICA and random orthogonal starts to reduce local
+  # optimum risk in the nonconvex rotation problem.
   starts <- list(identity = diag(H))
+  ica_starts <- fastica_rotation_starts(
+    S = S,
+    n_starts = n_ica_starts,
+    ica_functions = ica_functions,
+    max_iter = ica_max_iter,
+    tol = ica_tol,
+    seed = seed + 4242L,
+    verbose = verbose
+  )
+  if (length(ica_starts)) starts <- c(starts, ica_starts)
   for (s in seq_len(n_random_starts)) {
     starts[[paste0("random_", s)]] <- random_orthogonal(H)
   }
@@ -1095,8 +1283,35 @@ estimate_mixture_ica_unknown_G <- function(
       workers = workers
     )
 
+    previous_mixture_loglik <- mixture_loglik_total(F, fits)
+    previous_rotation_score <- rotation_selection_score(
+      F = F,
+      fits = fits,
+      R = R,
+      loading_basis = rotation_loading_basis,
+      loading_l1_penalty = rotation_loading_l1_penalty
+    )
+    rotation_history <- vector("list", max_outer + 1L)
+    rotation_history[[1L]] <- data.frame(
+      outer_iteration = 0L,
+      mixture_loglik = previous_mixture_loglik,
+      rotation_selection_score = previous_rotation_score,
+      loading_l1 = rotation_loading_l1(rotation_loading_basis, R),
+      relative_mixture_loglik_improvement = NA_real_,
+      relative_rotation_score_improvement = NA_real_,
+      all_mixtures_converged = all(vapply(fits, function(z) isTRUE(z$converged), logical(1))),
+      rotation_update_seconds = NA_real_,
+      mixture_refit_seconds = NA_real_,
+      objective_seconds = NA_real_,
+      iteration_seconds = NA_real_,
+      stringsAsFactors = FALSE
+    )
+    rotation_converged <- FALSE
+    rotation_completed_outer <- 0L
+
     refit_current <- function(F_current, previous_fits) {
-      fit_column_mixtures_fixed_G(
+      refit_start <- Sys.time()
+      out <- fit_column_mixtures_fixed_G(
         F = F_current,
         G_fixed = G_fixed,
         n_starts = n_mix_starts,
@@ -1111,9 +1326,14 @@ estimate_mixture_ica_unknown_G <- function(
         parallel = use_parallel_mixtures,
         workers = workers
       )
+      mixture_refit_seconds <<- mixture_refit_seconds +
+        as.numeric(difftime(Sys.time(), refit_start, units = "secs"))
+      out
     }
 
     for (outer in seq_len(max_outer)) {
+      rotation_iter_start <- Sys.time()
+      mixture_refit_seconds <- 0
       # Alternate rotation updates with re-estimating the one-dimensional
       # mixtures. Component counts are fixed at the supplied G_fixed values.
       if (rotation_sweep == "full") {
@@ -1121,7 +1341,9 @@ estimate_mixture_ica_unknown_G <- function(
           S = S,
           R = R,
           fits = fits,
-          grid_size = grid_size
+          grid_size = grid_size,
+          loading_basis = rotation_loading_basis,
+          loading_l1_penalty = rotation_loading_l1_penalty
         )
         R <- sweep_out$R
         F <- sweep_out$F
@@ -1132,6 +1354,8 @@ estimate_mixture_ica_unknown_G <- function(
           R = R,
           fits = fits,
           grid_size = grid_size,
+          loading_basis = rotation_loading_basis,
+          loading_l1_penalty = rotation_loading_l1_penalty,
           pairing = disjoint_pairing,
           seed = seed + 10000L * start_index + outer,
           parallel = !use_parallel_mixtures && isTRUE(parallel),
@@ -1147,6 +1371,8 @@ estimate_mixture_ica_unknown_G <- function(
             R = R,
             fits = fits,
             grid_size = grid_size,
+            loading_basis = rotation_loading_basis,
+            loading_l1_penalty = rotation_loading_l1_penalty,
             pairing = disjoint_pairing,
             seed = seed + 10000L * start_index + 100L * outer + round_id,
             parallel = !use_parallel_mixtures && isTRUE(parallel),
@@ -1169,7 +1395,9 @@ estimate_mixture_ica_unknown_G <- function(
             R = R,
             fits = fits,
             pairs = promising_pairs,
-            grid_size = grid_size
+            grid_size = grid_size,
+            loading_basis = rotation_loading_basis,
+            loading_l1_penalty = rotation_loading_l1_penalty
           )
           R <- sweep_out$R
           F <- sweep_out$F
@@ -1188,7 +1416,9 @@ estimate_mixture_ica_unknown_G <- function(
           R = R,
           fits = fits,
           pairs = promising_pairs,
-          grid_size = grid_size
+          grid_size = grid_size,
+          loading_basis = rotation_loading_basis,
+          loading_l1_penalty = rotation_loading_l1_penalty
         )
         R <- sweep_out$R
         F <- sweep_out$F
@@ -1199,6 +1429,8 @@ estimate_mixture_ica_unknown_G <- function(
           R = R,
           fits = fits,
           grid_size = grid_size,
+          loading_basis = rotation_loading_basis,
+          loading_l1_penalty = rotation_loading_l1_penalty,
           pairing = disjoint_pairing,
           seed = seed + 10000L * start_index + outer,
           parallel = !use_parallel_mixtures && isTRUE(parallel),
@@ -1208,21 +1440,89 @@ estimate_mixture_ica_unknown_G <- function(
         F <- sweep_out$F
         fits <- refit_current(F, fits)
       }
+
+      objective_start <- Sys.time()
+      current_mixture_loglik <- mixture_loglik_total(F, fits)
+      current_rotation_score <- rotation_selection_score(
+        F = F,
+        fits = fits,
+        R = R,
+        loading_basis = rotation_loading_basis,
+        loading_l1_penalty = rotation_loading_l1_penalty
+      )
+      objective_seconds <- as.numeric(difftime(Sys.time(), objective_start, units = "secs"))
+      relative_rotation_improvement <- (current_rotation_score - previous_rotation_score) /
+        (1 + abs(previous_rotation_score))
+      relative_mixture_loglik_improvement <- (current_mixture_loglik - previous_mixture_loglik) /
+        (1 + abs(previous_mixture_loglik))
+      all_mixtures_converged <- all(vapply(fits, function(z) isTRUE(z$converged), logical(1)))
+      iteration_seconds <- as.numeric(difftime(Sys.time(), rotation_iter_start, units = "secs"))
+      rotation_history[[outer + 1L]] <- data.frame(
+        outer_iteration = outer,
+        mixture_loglik = current_mixture_loglik,
+        rotation_selection_score = current_rotation_score,
+        loading_l1 = rotation_loading_l1(rotation_loading_basis, R),
+        relative_mixture_loglik_improvement = relative_mixture_loglik_improvement,
+        relative_rotation_score_improvement = relative_rotation_improvement,
+        all_mixtures_converged = all_mixtures_converged,
+        rotation_update_seconds = max(iteration_seconds - mixture_refit_seconds - objective_seconds, 0),
+        mixture_refit_seconds = mixture_refit_seconds,
+        objective_seconds = objective_seconds,
+        iteration_seconds = iteration_seconds,
+        stringsAsFactors = FALSE
+      )
+      rotation_completed_outer <- outer
+
+      if (is.finite(rotation_objective_tolerance) &&
+          outer >= rotation_min_outer &&
+          is.finite(relative_rotation_improvement) &&
+          relative_rotation_improvement <= rotation_objective_tolerance &&
+          (!isTRUE(require_mixture_convergence_for_rotation_stop) || all_mixtures_converged)) {
+        rotation_converged <- TRUE
+        if (verbose) {
+          message(
+            "  stopping rotation: relative rotation-score improvement ",
+            signif(relative_rotation_improvement, 3),
+            " <= ",
+            rotation_objective_tolerance,
+            "."
+          )
+        }
+        break
+      }
+      previous_mixture_loglik <- current_mixture_loglik
+      previous_rotation_score <- current_rotation_score
     }
 
     # Rotation starts are compared by the profiled marginal mixture likelihood.
     loglik <- mixture_loglik_total(F, fits)
+    selection_score <- rotation_selection_score(
+      F = F,
+      fits = fits,
+      R = R,
+      loading_basis = rotation_loading_basis,
+      loading_l1_penalty = rotation_loading_l1_penalty
+    )
     list(
       F_hat = F,
       R = R,
       fits = fits,
       G_hat = vapply(fits, function(z) length(z$pi), integer(1)),
       loglik = loglik,
+      selection_score = selection_score,
+      loading_l1 = rotation_loading_l1(rotation_loading_basis, R),
+      rotation_history = do.call(rbind, rotation_history[!vapply(rotation_history, is.null, logical(1))]),
+      rotation_converged = rotation_converged,
+      rotation_completed_outer = rotation_completed_outer,
+      rotation_objective_tolerance = rotation_objective_tolerance,
+      rotation_min_outer = rotation_min_outer,
+      require_mixture_convergence_for_rotation_stop = isTRUE(require_mixture_convergence_for_rotation_stop),
       G_selection = "fixed",
       mixture_update = mixture_update,
       rotation_sweep = rotation_sweep,
       disjoint_pairing = disjoint_pairing,
-      n_disjoint_rounds = n_disjoint_rounds
+      n_disjoint_rounds = n_disjoint_rounds,
+      rotation_loading_l1_penalty = rotation_loading_l1_penalty
     )
   }
 
@@ -1238,12 +1538,14 @@ estimate_mixture_ica_unknown_G <- function(
   names(results) <- names(starts)
 
   # Return the best rotation start and retain scores for diagnostics.
-  scores <- vapply(results, function(z) z$loglik, numeric(1))
+  scores <- vapply(results, function(z) z$selection_score, numeric(1))
   best <- which.max(scores)
   out <- results[[best]]
   out$start_name <- names(results)[best]
   out$all_start_scores <- scores
-  out$all_start_loglik <- scores
+  out$all_start_mixture_loglik <- vapply(results, function(z) z$loglik, numeric(1))
+  out$all_start_loading_l1 <- vapply(results, function(z) z$loading_l1, numeric(1))
+  out$all_start_loglik <- out$all_start_mixture_loglik
   out
 }
 
@@ -1593,6 +1895,10 @@ fit_binary_probit_pretraining <- function(
     pretrain_objective_patience = 0L,
     min_aug_iter = 2L,
     grid_size = 21L,
+    rotation_ica_starts = 0L,
+    rotation_ica_functions = c("logcosh", "exp"),
+    rotation_ica_max_iter = 200L,
+    rotation_ica_tol = 1e-4,
     rotation_sweep = c("full", "disjoint", "multi_disjoint", "promising", "hybrid"),
     disjoint_pairing = c("random", "adjacent"),
     n_disjoint_rounds = 4L,
@@ -1683,6 +1989,8 @@ fit_binary_probit_pretraining <- function(
     svd_out <- svd_scores_from_Z(Z, H = H, center_Z = center_Z_for_svd)
     svd_seconds <- as.numeric(difftime(Sys.time(), svd_start, units = "secs"))
     S <- svd_out$S
+    loading_basis_for_rotation <- svd_out$V[, seq_len(H), drop = FALSE] %*%
+      diag(svd_out$singular_values[seq_len(H)] / sqrt(nrow(Z)), H, H)
 
     # Step 2: rotate the SVD basis toward independent non-Gaussian mixture
     # coordinates with fixed marginal mixture counts.
@@ -1691,6 +1999,10 @@ fit_binary_probit_pretraining <- function(
       S = S,
       G_fixed = G_fixed,
       n_random_starts = n_random_starts,
+      n_ica_starts = rotation_ica_starts,
+      ica_functions = rotation_ica_functions,
+      ica_max_iter = rotation_ica_max_iter,
+      ica_tol = rotation_ica_tol,
       max_outer = max_outer,
       n_mix_starts = n_mix_starts,
       mixture_max_iter = mixture_max_iter,
@@ -1707,6 +2019,8 @@ fit_binary_probit_pretraining <- function(
       promising_max_pairs = promising_max_pairs,
       promising_fraction = promising_fraction,
       promising_min_score = promising_min_score,
+      rotation_loading_basis = loading_basis_for_rotation,
+      rotation_loading_l1_penalty = rotation_loading_l1_penalty,
       seed = seed + 1000L + iter,
       parallel = parallel,
       workers = workers,

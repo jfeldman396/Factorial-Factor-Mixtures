@@ -3,7 +3,7 @@
 This guide explains how to replicate the two analysis tracks in this repository:
 
 1. the IFEval empirical analysis;
-2. the sample-size simulation comparing the proposed factorial factor-mixture method with a joint-mixture Gibbs sampler.
+2. the sample-size simulation comparing the proposed factorial factor-mixture method with Viroli-style Gibbs samplers.
 
 Run these commands in a local macOS Terminal, not in the GitHub web interface.
 All commands assume the repository root is the working directory:
@@ -19,6 +19,8 @@ The code is written primarily in R. The main scripts use:
 - base R and `parallel`;
 - `MASS`;
 - `truncnorm`;
+- `glmnet`;
+- `coda`;
 - `ggplot2`;
 - `reshape2`;
 - `mclust`.
@@ -191,7 +193,83 @@ ability profiles by factor.
 
 ## Sample-Size Simulation
 
-The main simulation compares:
+The current final simulation uses deterministic EM-SVD likelihood pretraining
+for the proposed product-mixture method and compares it against two
+Viroli-style Gibbs samplers.  The design and algorithms are summarized in:
+
+```text
+writeup/final_simulation_design/final_simulation_design_algorithms.pdf
+```
+
+The final launcher is:
+
+```sh
+Rscript scripts/sample_size/run_final_product_viroli_simulation.R
+```
+
+By default this runs:
+
+- `n in {100, 200, 300, 400}`;
+- `p in {500, 1000, 2000, 4000}` for product MAP;
+- `p in {500, 1000}` for the Viroli baselines, to control runtime;
+- `H in {5, 10, 15, 20}`;
+- `G in {2, 3}`, expanded to equal component counts across factors;
+- separation values `{1, 2}`;
+- 25 Monte Carlo repetitions;
+- IFEval-like unbalanced Cross loadings;
+- item intercepts using the IFEval-like intercept design;
+- loading-based sign/permutation alignment for all recovery metrics;
+- Product MAP with EM-SVD likelihood pretraining, rotation, and MAP
+  refinement;
+- Viroli Gibbs with a Laplace loading prior and penalty 10;
+- Viroli Gibbs with a diffuse Gaussian loading prior.
+
+The main output folder is:
+
+```text
+results/full/final_cross_ifeval_product_viroli
+```
+
+The run is resumable.  Each scenario-method pair is keyed in
+`comparison_results_checkpoint.csv`; rerunning the launcher with
+`RESUME_EXISTING=TRUE` skips completed fits.  The checkpoint records the full
+DGP setting, penalties, mixture priors, convergence diagnostics, elapsed
+seconds, ESS summaries for Gibbs draws, and DGP diagnostics such as item
+prevalence and observed joint profiles.
+
+### Final Simulation Smoke Test
+
+For a fast code-path check:
+
+```sh
+OUT_DIR=results/diagnostics/final_launcher_smoke \
+N_VALUES=20 \
+P_VALUES_PRODUCT=30 \
+P_VALUES_VIROLI=30 \
+BLOCK_SIZE_MODES=balanced \
+H_VALUES=2 \
+G_VALUES=2 \
+SEPARATIONS=1 \
+REP_VALUES=1 \
+EM_SVD_ITER=3 \
+ROTATION_ITER=2 \
+REFINE_ITER=3 \
+MIXTURE_MAX_ITER=10 \
+VIROLI_ITER=20 \
+VIROLI_BURN=10 \
+VIROLI_COMPUTE_PARAMETER_ESS=FALSE \
+PARALLEL_OURS=FALSE \
+PARALLEL_GIBBS=FALSE \
+WRITE_PARAMETER_TABLES=TRUE \
+Rscript scripts/sample_size/run_final_product_viroli_simulation.R
+```
+
+This smoke test only verifies the product MAP, Viroli-Laplace, and
+Viroli-Gaussian code paths.  It is not a scientific simulation.
+
+### Legacy Sampled-Z Simulation
+
+The earlier sampled-Z simulation compares:
 
 - `independent_marginal_mixture`: the proposed method with sampled augmented-probit SVD pretraining, independent marginal mixture rotation, item intercepts, and MAP refinement;
 - `joint_mixture_factor_gibbs`: a correctly specified joint-mixture factor model with `G^H` latent profiles and diagonal within-profile covariance, fitted by full Gibbs sampling with probit augmentation.

@@ -297,6 +297,80 @@ fit_probit_lasso_item <- function(
   }
 }
 
+fit_probit_glmnet_lasso_item <- function(
+    y,
+    F_hat,
+    alpha_init = NULL,
+    beta_init = NULL,
+    lambda_l1_penalty = 0,
+    estimate_intercept = TRUE,
+    maxit = 200L,
+    tol = 1e-6,
+    standardize = FALSE) {
+  # Pipeline role: faster exact probit-lasso item update using glmnet >= 4,
+  # which accepts GLM family objects such as binomial(link = "probit").  glmnet
+  # minimizes average negative log likelihood, so the simulation's summed-loss
+  # penalty lambda * |beta| is passed as lambda / n.
+  H <- ncol(F_hat)
+  lambda_l1_penalty <- coerce_lambda_l1_penalty(lambda_l1_penalty, H)
+
+  fallback <- function() {
+    fit_probit_lasso_item(
+      y = y,
+      F_hat = F_hat,
+      alpha_init = alpha_init,
+      beta_init = beta_init,
+      lambda_l1_penalty = lambda_l1_penalty,
+      estimate_intercept = estimate_intercept,
+      maxit = maxit,
+      tol = tol
+    )
+  }
+
+  if (!requireNamespace("glmnet", quietly = TRUE)) return(fallback())
+
+  penalty_mean <- mean(lambda_l1_penalty)
+  if (!is.finite(penalty_mean) || penalty_mean <= 0) return(fallback())
+  penalty_factor <- lambda_l1_penalty / penalty_mean
+  lambda_glmnet <- penalty_mean / length(y)
+
+  fit <- tryCatch(
+    glmnet::glmnet(
+      x = as.matrix(F_hat),
+      y = as.numeric(y),
+      family = binomial(link = "probit"),
+      alpha = 1,
+      lambda = lambda_glmnet,
+      standardize = isTRUE(standardize),
+      intercept = isTRUE(estimate_intercept),
+      penalty.factor = penalty_factor,
+      thresh = tol,
+      maxit = max(100000L, as.integer(maxit))
+    ),
+    error = function(e) NULL
+  )
+  if (is.null(fit)) return(fallback())
+
+  coef_mat <- tryCatch(
+    as.matrix(stats::coef(fit, s = lambda_glmnet)),
+    error = function(e) NULL
+  )
+  if (is.null(coef_mat)) return(fallback())
+
+  alpha <- 0
+  if (isTRUE(estimate_intercept)) {
+    if (!"(Intercept)" %in% rownames(coef_mat)) return(fallback())
+    alpha <- unname(coef_mat["(Intercept)", 1L])
+  }
+
+  loading_rows <- setdiff(rownames(coef_mat), "(Intercept)")
+  if (length(loading_rows) < H) return(fallback())
+  loading <- as.numeric(coef_mat[loading_rows[seq_len(H)], 1L])
+
+  if (!is.finite(alpha) || any(!is.finite(loading))) return(fallback())
+  list(alpha = alpha, lambda = loading)
+}
+
 update_binary_probit_loadings_glm <- function(
     X,
     F_hat,
@@ -306,6 +380,8 @@ update_binary_probit_loadings_glm <- function(
     estimate_intercept = TRUE,
     lasso_maxit = 200L,
     lasso_tol = 1e-6,
+    lasso_backend = c("proximal", "glmnet"),
+    glmnet_standardize = FALSE,
     parallel = FALSE,
     workers = NULL) {
   # Pipeline role: itemwise loading/intercept update in refinement.  Conditional
@@ -315,6 +391,7 @@ update_binary_probit_loadings_glm <- function(
   F_hat <- as.matrix(F_hat)
   p <- ncol(X)
   H <- ncol(F_hat)
+  lasso_backend <- match.arg(lasso_backend)
   lambda_l1_penalty <- coerce_lambda_l1_penalty(lambda_l1_penalty, H)
   Lambda <- matrix(0, p, H)
   alpha <- rep(0, p)
@@ -337,6 +414,19 @@ update_binary_probit_loadings_glm <- function(
     alpha_j_init <- if (!is.null(alpha_init)) alpha_init[j] else NULL
 
     if (any(lambda_l1_penalty > 0)) {
+      if (identical(lasso_backend, "glmnet")) {
+        return(fit_probit_glmnet_lasso_item(
+          y = X[, j],
+          F_hat = F_hat,
+          alpha_init = alpha_j_init,
+          beta_init = beta_init,
+          lambda_l1_penalty = lambda_l1_penalty,
+          estimate_intercept = estimate_intercept,
+          maxit = lasso_maxit,
+          tol = lasso_tol,
+          standardize = glmnet_standardize
+        ))
+      }
       return(fit_probit_lasso_item(
         y = X[, j],
         F_hat = F_hat,
@@ -440,6 +530,97 @@ mixture_responsibility_list <- function(F_hat, mixture_fits, hard = FALSE) {
     }
     resp_h
   })
+}
+
+moment_corrected_mixture_responsibility_list <- function(
+    F_hat,
+    factor_var_diag,
+    mixture_fits,
+    hard = FALSE,
+    min_var = 1e-8) {
+  # Variational/Laplace soft classification.  If f_ih | X is approximated by
+  # N(m_ih, v_ih), classify using E_q[log N(f_ih; mu_hg, sigma_hg^2)] rather
+  # than pretending the point estimate m_ih is observed.
+  F_hat <- as.matrix(F_hat)
+  factor_var_diag <- as.matrix(factor_var_diag)
+  lapply(seq_len(ncol(F_hat)), function(h) {
+    fit_h <- mixture_fits[[h]]
+    var_h <- pmax(fit_h$var, min_var)
+    log_resp <- vapply(seq_along(fit_h$pi), function(g) {
+      log(pmax(fit_h$pi[g], 1e-12)) -
+        0.5 * log(2 * pi * var_h[g]) -
+        0.5 * ((F_hat[, h] - fit_h$mu[g])^2 + factor_var_diag[, h]) / var_h[g]
+    }, numeric(nrow(F_hat)))
+    log_den <- row_log_sum_exp(log_resp)
+    resp_h <- exp(log_resp - log_den)
+    if (isTRUE(hard)) {
+      z <- max.col(resp_h, ties.method = "first")
+      hard_resp <- matrix(0, nrow = nrow(resp_h), ncol = ncol(resp_h))
+      hard_resp[cbind(seq_len(nrow(resp_h)), z)] <- 1
+      resp_h <- hard_resp
+    }
+    resp_h
+  })
+}
+
+factor_posterior_diag_variance <- function(
+    X,
+    F_hat,
+    Lambda,
+    alpha = NULL,
+    mixture_fits,
+    responsibility_list = NULL,
+    factor_update = c("marginal", "conditional_soft", "conditional_hard"),
+    mixture_prior_weight = 1,
+    min_var = 1e-6,
+    max_var = 1e6,
+    parallel = FALSE,
+    workers = NULL) {
+  # Diagonal Laplace approximation for Var(f_i | X_i).  The binary probit
+  # likelihood contributes item information Lambda' W_i Lambda.  The mixture
+  # prior contributes the local expected Gaussian precision sum_g gamma_ihg /
+  # sigma_hg^2.  We keep only the diagonal for speed and stability.
+  factor_update <- match.arg(factor_update)
+  X <- as.matrix(X)
+  F_hat <- as.matrix(F_hat)
+  Lambda <- as.matrix(Lambda)
+  if (is.null(alpha)) alpha <- rep(0, ncol(X))
+  alpha <- as.numeric(alpha)
+  H <- ncol(F_hat)
+
+  rows <- parallel_lapply(seq_len(nrow(X)), function(i) {
+    eta <- as.numeric(alpha + Lambda %*% F_hat[i, ])
+    phi <- dnorm(eta)
+    p1 <- pmax(pnorm(eta), 1e-12)
+    p0 <- pmax(pnorm(-eta), 1e-12)
+    y <- X[i, ]
+
+    # Observed information for log Phi(eta) or log Phi(-eta).  Clamp to avoid
+    # numerical trouble in nearly separated probit items.
+    w1 <- phi / p1
+    w0 <- phi / p0
+    info_eta <- y * w1 * (eta + w1) + (1 - y) * w0 * (w0 - eta)
+    info_eta[!is.finite(info_eta) | info_eta < 0] <- 0
+    precision <- as.numeric(crossprod(Lambda^2, info_eta))
+
+    for (h in seq_len(H)) {
+      if (!is.null(responsibility_list)) {
+        resp_h <- responsibility_list[[h]][i, ]
+      } else {
+        resp_h <- mixture_responsibilities(F_hat[i, h], mixture_fits[[h]])
+        resp_h <- as.numeric(resp_h[1L, ])
+      }
+      resp_h <- resp_h / sum(resp_h)
+      precision[h] <- precision[h] + mixture_prior_weight *
+        sum(resp_h / pmax(mixture_fits[[h]]$var, min_var))
+    }
+
+    1 / pmin(pmax(precision, 1 / max_var), 1 / min_var)
+  }, parallel = parallel, workers = workers)
+
+  out <- do.call(rbind, rows)
+  colnames(out) <- colnames(F_hat)
+  out
 }
 
 update_one_factor_score <- function(
@@ -676,9 +857,176 @@ normalize_refinement_factor_location <- function(
 # Mixture update during refinement
 # ----------------------------------------------------------------------------
 
+update_gmm_1d_from_responsibilities <- function(
+    x,
+    resp,
+    min_var = 1e-3,
+    min_weight = 1e-4,
+    mixture_update = c("map", "mle"),
+    mu_prior_mean = 0,
+    mu_prior_kappa = 0.01,
+    var_prior_shape = 2,
+    var_prior_scale = 0.3,
+    weight_prior_alpha = 1) {
+  # Weighted M-step for one marginal Gaussian mixture when component
+  # responsibilities have already been estimated.  This shares the same MLE/MAP
+  # formulas as fit_gmm_1d(), but skips the inner EM loop.
+  mixture_update <- match.arg(mixture_update)
+  x <- as.numeric(x)
+  resp <- as.matrix(resp)
+  n <- length(x)
+  G <- ncol(resp)
+  if (nrow(resp) != n || G < 1L) {
+    stop("responsibility matrix must have one row per factor score.")
+  }
+
+  resp[!is.finite(resp) | resp < 0] <- 0
+  row_total <- rowSums(resp)
+  bad_rows <- !is.finite(row_total) | row_total <= 0
+  if (any(bad_rows)) {
+    resp[bad_rows, ] <- 1 / G
+    row_total[bad_rows] <- 1
+  }
+  resp <- resp / row_total
+
+  nk <- colSums(resp) + 1e-12
+  xbar <- colSums(resp * x) / nk
+  centered <- sweep(matrix(x, nrow = n, ncol = G), 2L, xbar, "-")
+  ss <- colSums(resp * centered^2)
+
+  if (mixture_update == "map") {
+    alpha <- rep(weight_prior_alpha, G)
+    if (length(weight_prior_alpha) == G) alpha <- weight_prior_alpha
+    if (any(alpha < 1)) stop("weight_prior_alpha must be >= 1 for MAP weights.")
+    pi_g <- pmax(nk + alpha - 1, min_weight)
+    pi_g <- pi_g / sum(pi_g)
+
+    kappa0 <- pmax(mu_prior_kappa, 0)
+    kappa_n <- kappa0 + nk
+    mu_g <- (kappa0 * mu_prior_mean + nk * xbar) / kappa_n
+    shape_n <- var_prior_shape + nk / 2
+    scale_n <- var_prior_scale + 0.5 * ss +
+      (kappa0 * nk * (xbar - mu_prior_mean)^2) / (2 * kappa_n)
+    var_g <- pmax(scale_n / (shape_n + 1), min_var)
+  } else {
+    pi_g <- pmax(nk / n, min_weight)
+    pi_g <- pi_g / sum(pi_g)
+    mu_g <- xbar
+    var_g <- pmax(ss / nk, min_var)
+  }
+
+  fit <- list(
+    pi = pi_g,
+    mu = mu_g,
+    var = var_g,
+    G = G,
+    converged = TRUE,
+    mixture_update = mixture_update,
+    fixed_responsibility_mstep = TRUE,
+    mu_prior_mean = mu_prior_mean,
+    mu_prior_kappa = mu_prior_kappa,
+    var_prior_shape = var_prior_shape,
+    var_prior_scale = var_prior_scale,
+    weight_prior_alpha = weight_prior_alpha
+  )
+  fit$loglik <- sum(log_dmix_1d(x, fit))
+
+  ord <- order(fit$mu)
+  fit$pi <- fit$pi[ord]
+  fit$mu <- fit$mu[ord]
+  fit$var <- fit$var[ord]
+  fit
+}
+
+update_gmm_1d_from_posterior_moments <- function(
+    m,
+    v,
+    resp,
+    min_var = 1e-3,
+    min_weight = 1e-4,
+    mixture_update = c("map", "mle"),
+    mu_prior_mean = 0,
+    mu_prior_kappa = 0.01,
+    var_prior_shape = 2,
+    var_prior_scale = 0.3,
+    weight_prior_alpha = 1) {
+  # Moment-corrected M-step for q(f_ih | X_i) ~= N(m_ih, v_ih).  This is the
+  # deterministic analogue of Gibbs using sampled latent factors: mixture
+  # updates receive posterior first and second moments rather than point MAP
+  # scores alone.
+  mixture_update <- match.arg(mixture_update)
+  m <- as.numeric(m)
+  v <- pmax(as.numeric(v), 0)
+  resp <- as.matrix(resp)
+  n <- length(m)
+  G <- ncol(resp)
+  if (length(v) != n || nrow(resp) != n || G < 1L) {
+    stop("posterior moments and responsibilities must have compatible sizes.")
+  }
+
+  resp[!is.finite(resp) | resp < 0] <- 0
+  row_total <- rowSums(resp)
+  bad_rows <- !is.finite(row_total) | row_total <= 0
+  if (any(bad_rows)) {
+    resp[bad_rows, ] <- 1 / G
+    row_total[bad_rows] <- 1
+  }
+  resp <- resp / row_total
+
+  nk <- colSums(resp) + 1e-12
+  xbar <- colSums(resp * m) / nk
+  centered <- sweep(matrix(m, nrow = n, ncol = G), 2L, xbar, "-")
+  ss <- colSums(resp * (centered^2 + v))
+
+  if (mixture_update == "map") {
+    alpha <- rep(weight_prior_alpha, G)
+    if (length(weight_prior_alpha) == G) alpha <- weight_prior_alpha
+    if (any(alpha < 1)) stop("weight_prior_alpha must be >= 1 for MAP weights.")
+    pi_g <- pmax(nk + alpha - 1, min_weight)
+    pi_g <- pi_g / sum(pi_g)
+
+    kappa0 <- pmax(mu_prior_kappa, 0)
+    kappa_n <- kappa0 + nk
+    mu_g <- (kappa0 * mu_prior_mean + nk * xbar) / kappa_n
+    shape_n <- var_prior_shape + nk / 2
+    scale_n <- var_prior_scale + 0.5 * ss +
+      (kappa0 * nk * (xbar - mu_prior_mean)^2) / (2 * kappa_n)
+    var_g <- pmax(scale_n / (shape_n + 1), min_var)
+  } else {
+    pi_g <- pmax(nk / n, min_weight)
+    pi_g <- pi_g / sum(pi_g)
+    mu_g <- xbar
+    var_g <- pmax(ss / nk, min_var)
+  }
+
+  fit <- list(
+    pi = pi_g,
+    mu = mu_g,
+    var = var_g,
+    G = G,
+    converged = TRUE,
+    mixture_update = mixture_update,
+    posterior_moment_mstep = TRUE,
+    mu_prior_mean = mu_prior_mean,
+    mu_prior_kappa = mu_prior_kappa,
+    var_prior_shape = var_prior_shape,
+    var_prior_scale = var_prior_scale,
+    weight_prior_alpha = weight_prior_alpha
+  )
+  fit$loglik <- sum(log_dmix_1d(m, fit))
+
+  ord <- order(fit$mu)
+  fit$pi <- fit$pi[ord]
+  fit$mu <- fit$mu[ord]
+  fit$var <- fit$var[ord]
+  fit
+}
+
 update_mixture_fits_fixed_G <- function(
     F_hat,
     mixture_fits,
+    responsibility_list = NULL,
+    factor_var_diag = NULL,
     n_starts = 3L,
     max_iter = 20L,
     min_var = 1e-3,
@@ -691,7 +1039,40 @@ update_mixture_fits_fixed_G <- function(
     parallel = FALSE,
     workers = NULL) {
   mixture_update <- match.arg(mixture_update)
+  if (!is.null(factor_var_diag)) factor_var_diag <- as.matrix(factor_var_diag)
   parallel_lapply(seq_len(ncol(F_hat)), function(h) {
+    if (!is.null(responsibility_list)) {
+      if (!is.null(factor_var_diag)) {
+        return(update_gmm_1d_from_posterior_moments(
+          m = F_hat[, h],
+          v = factor_var_diag[, h],
+          resp = responsibility_list[[h]],
+          min_var = min_var,
+          mixture_update = mixture_update,
+          mu_prior_mean = mu_prior_mean,
+          mu_prior_kappa = mu_prior_kappa,
+          var_prior_shape = var_prior_shape,
+          var_prior_scale = var_prior_scale,
+          weight_prior_alpha = weight_prior_alpha
+        ))
+      }
+      # One weighted M-step using responsibilities fixed before the current
+      # factor-score update.  This is a fast classification/soft-EM variant:
+      # clusters are estimated first, then the mixture parameters are refreshed
+      # from the updated factor scores without a free inner EM relabeling step.
+      return(update_gmm_1d_from_responsibilities(
+        F_hat[, h],
+        resp = responsibility_list[[h]],
+        min_var = min_var,
+        mixture_update = mixture_update,
+        mu_prior_mean = mu_prior_mean,
+        mu_prior_kappa = mu_prior_kappa,
+        var_prior_shape = var_prior_shape,
+        var_prior_scale = var_prior_scale,
+        weight_prior_alpha = weight_prior_alpha
+      ))
+    }
+
     # Keep the current number of components for factor h and warm-start EM from
     # the current mixture parameters.
     fit_gmm_1d(
@@ -714,6 +1095,8 @@ update_mixture_fits_fixed_G <- function(
 update_mixture_fits_refinement <- function(
     F_hat,
     mixture_fits,
+    responsibility_list = NULL,
+    factor_var_diag = NULL,
     n_starts = 3L,
     max_iter = 20L,
     min_var = 1e-3,
@@ -730,6 +1113,8 @@ update_mixture_fits_refinement <- function(
   update_mixture_fits_fixed_G(
     F_hat = F_hat,
     mixture_fits = mixture_fits,
+    responsibility_list = responsibility_list,
+    factor_var_diag = factor_var_diag,
     n_starts = n_starts,
     max_iter = max_iter,
     min_var = min_var,
@@ -758,6 +1143,7 @@ fit_binary_probit_refinement <- function(
     factor_update = c("marginal", "conditional_soft", "conditional_hard"),
     min_mixture_var = 1e-3,
     mixture_update = c("map", "mle"),
+    mixture_refit = c("em", "fixed_responsibility_mstep", "posterior_moment_mstep"),
     mu_prior_mean = 0,
     mu_prior_kappa = 0.01,
     var_prior_shape = 2,
@@ -769,6 +1155,8 @@ fit_binary_probit_refinement <- function(
     lambda_l1_penalty = 0,
     lasso_maxit = 200L,
     lasso_tol = 1e-6,
+    lasso_backend = c("proximal", "glmnet"),
+    glmnet_standardize = FALSE,
     normalize_factor_scale = TRUE,
     normalize_factor_location = TRUE,
     factor_scale_target = 1,
@@ -776,8 +1164,11 @@ fit_binary_probit_refinement <- function(
     objective_tolerance = 1e-5,
     min_refine_iter = 1L,
     stopping_objective = c("posterior_objective", "joint_objective", "binary_loglik", "mixture_loglik"),
+    enforce_monotone_refinement = TRUE,
+    monotone_tolerance = 1e-8,
     return_best_refinement_iteration = FALSE,
     refinement_selection_objective = c("posterior_objective", "joint_objective", "binary_loglik", "mixture_loglik"),
+    require_mixture_convergence_for_stop = FALSE,
     store_refinement_trace = FALSE,
     parallel = FALSE,
     workers = NULL,
@@ -788,14 +1179,19 @@ fit_binary_probit_refinement <- function(
   # updates, factor scale/location normalization, and fixed-G mixture updates.
   factor_update <- match.arg(factor_update)
   mixture_update <- match.arg(mixture_update)
+  mixture_refit <- match.arg(mixture_refit)
   factor_scale_method <- match.arg(factor_scale_method)
   stopping_objective <- match.arg(stopping_objective)
   refinement_selection_objective <- match.arg(refinement_selection_objective)
+  lasso_backend <- match.arg(lasso_backend)
   X <- as.matrix(X)
   workers <- resolve_workers(workers)
   min_refine_iter <- as.integer(min_refine_iter)
   mixture_prior_weight <- as.numeric(mixture_prior_weight)
   estimate_intercept <- isTRUE(estimate_intercept)
+  enforce_monotone_refinement <- isTRUE(enforce_monotone_refinement)
+  monotone_tolerance <- as.numeric(monotone_tolerance)
+  if (!is.finite(monotone_tolerance) || monotone_tolerance < 0) monotone_tolerance <- 0
   if (!is.finite(mixture_prior_weight) || mixture_prior_weight < 0) {
     stop("mixture_prior_weight must be a nonnegative finite number.")
   }
@@ -826,6 +1222,8 @@ fit_binary_probit_refinement <- function(
       estimate_intercept = estimate_intercept,
       lasso_maxit = lasso_maxit,
       lasso_tol = lasso_tol,
+      lasso_backend = lasso_backend,
+      glmnet_standardize = glmnet_standardize,
       parallel = parallel,
       workers = workers
     )
@@ -899,6 +1297,9 @@ fit_binary_probit_refinement <- function(
     normalize_seconds = NA_real_,
     lambda_update_seconds = NA_real_,
     mixture_update_seconds = NA_real_,
+    factor_posterior_var_median = NA_real_,
+    all_mixtures_converged = all(vapply(mixture_fits, function(z) isTRUE(z$converged), logical(1))),
+    iteration_rejected_by_monotone_guard = FALSE,
     objective_seconds = NA_real_,
     iteration_seconds = NA_real_
   )
@@ -922,6 +1323,18 @@ fit_binary_probit_refinement <- function(
   for (iter in seq_len(n_refine_iter)) {
     iter_start <- Sys.time()
     if (verbose) message("Joint refinement iteration ", iter, " of ", n_refine_iter, ".")
+    previous_F_hat <- F_hat
+    previous_alpha <- alpha
+    previous_Lambda <- Lambda
+    previous_mixture_fits <- mixture_fits
+    fixed_mixture_responsibilities <- NULL
+    if (mixture_refit == "fixed_responsibility_mstep") {
+      fixed_mixture_responsibilities <- mixture_responsibility_list(
+        F_hat,
+        mixture_fits,
+        hard = factor_update == "conditional_hard"
+      )
+    }
 
     # Step 1: update latent factor scores subject by subject.
     factor_update_start <- Sys.time()
@@ -984,6 +1397,8 @@ fit_binary_probit_refinement <- function(
       estimate_intercept = estimate_intercept,
       lasso_maxit = lasso_maxit,
       lasso_tol = lasso_tol,
+      lasso_backend = lasso_backend,
+      glmnet_standardize = glmnet_standardize,
       parallel = parallel,
       workers = workers
     )
@@ -996,12 +1411,44 @@ fit_binary_probit_refinement <- function(
     }
     lambda_update_seconds <- as.numeric(difftime(Sys.time(), lambda_update_start, units = "secs"))
 
+    factor_var_diag_for_mixture <- NULL
+    mixture_refit_responsibilities <- fixed_mixture_responsibilities
+    if (mixture_refit == "posterior_moment_mstep") {
+      point_responsibilities <- mixture_responsibility_list(
+        F_hat,
+        mixture_fits,
+        hard = factor_update == "conditional_hard"
+      )
+      factor_var_diag_for_mixture <- factor_posterior_diag_variance(
+        X = X,
+        F_hat = F_hat,
+        Lambda = Lambda,
+        alpha = alpha,
+        mixture_fits = mixture_fits,
+        responsibility_list = point_responsibilities,
+        factor_update = factor_update,
+        mixture_prior_weight = mixture_prior_weight,
+        min_var = min_mixture_var,
+        parallel = parallel,
+        workers = workers
+      )
+      mixture_refit_responsibilities <- moment_corrected_mixture_responsibility_list(
+        F_hat = F_hat,
+        factor_var_diag = factor_var_diag_for_mixture,
+        mixture_fits = mixture_fits,
+        hard = FALSE,
+        min_var = min_mixture_var
+      )
+    }
+
     # Step 3: update marginal mixture profiles, keeping the pretrained component
     # count fixed for each factor.
     mixture_update_start <- Sys.time()
     mixture_fits <- update_mixture_fits_refinement(
       F_hat = F_hat,
       mixture_fits = mixture_fits,
+      responsibility_list = mixture_refit_responsibilities,
+      factor_var_diag = factor_var_diag_for_mixture,
       n_starts = n_mix_starts,
       max_iter = mixture_max_iter,
       min_var = min_mixture_var,
@@ -1015,6 +1462,7 @@ fit_binary_probit_refinement <- function(
       workers = workers
     )
     mixture_update_seconds <- as.numeric(difftime(Sys.time(), mixture_update_start, units = "secs"))
+    all_mixtures_converged <- all(vapply(mixture_fits, function(z) isTRUE(z$converged), logical(1)))
 
     # Track both pieces of the objective so we can see whether improvements
     # come from binary prediction, better mixture fit, or both.
@@ -1033,13 +1481,6 @@ fit_binary_probit_refinement <- function(
       Lambda,
       lambda_l1_penalty = lambda_l1_penalty_vec
     )
-    lambda_penalty_history[[iter + 1L]] <- data.frame(
-      iteration = iter,
-      factor = seq_len(ncol(Lambda)),
-      column_l1 = colSums(abs(Lambda)),
-      column_l2 = sqrt(colSums(Lambda^2)),
-      l1_penalty = lambda_l1_penalty_vec
-    )
     current_objective <- current_binary_loglik +
       mixture_prior_weight * current_mixture_loglik
     current_posterior_objective <- current_objective +
@@ -1056,6 +1497,47 @@ fit_binary_probit_refinement <- function(
     )
     objective_improvement <- current_stopping_value - previous_stopping_value
     relative_improvement <- objective_improvement / (1 + abs(previous_stopping_value))
+
+    iteration_rejected_by_monotone_guard <- FALSE
+    if (enforce_monotone_refinement &&
+        is.finite(objective_improvement) &&
+        objective_improvement < -monotone_tolerance) {
+      iteration_rejected_by_monotone_guard <- TRUE
+      rejected_drop <- -objective_improvement
+      F_hat <- previous_F_hat
+      alpha <- previous_alpha
+      Lambda <- previous_Lambda
+      mixture_fits <- previous_mixture_fits
+      all_mixtures_converged <- all(vapply(mixture_fits, function(z) isTRUE(z$converged), logical(1)))
+
+      previous_row <- history[[iter]]
+      current_binary_loglik <- previous_row$binary_loglik
+      current_mixture_loglik <- previous_row$mixture_loglik
+      current_mixture_parameter_logprior <- previous_row$mixture_parameter_logprior
+      current_lambda_logprior <- previous_row$lambda_logprior
+      current_objective <- previous_row$joint_objective
+      current_posterior_objective <- previous_row$posterior_objective
+      current_stopping_value <- previous_stopping_value
+      objective_improvement <- 0
+      relative_improvement <- 0
+
+      if (verbose) {
+        message(
+          "Rejecting refinement iteration ", iter,
+          ": ", stopping_objective, " decreased by ",
+          signif(rejected_drop, 3),
+          "."
+        )
+      }
+    }
+    lambda_penalty_history[[iter + 1L]] <- data.frame(
+      iteration = iter,
+      factor = seq_len(ncol(Lambda)),
+      column_l1 = colSums(abs(Lambda)),
+      column_l2 = sqrt(colSums(Lambda^2)),
+      l1_penalty = lambda_l1_penalty_vec
+    )
+
     objective_seconds <- as.numeric(difftime(Sys.time(), objective_start, units = "secs"))
     iteration_seconds <- as.numeric(difftime(Sys.time(), iter_start, units = "secs"))
 
@@ -1081,6 +1563,13 @@ fit_binary_probit_refinement <- function(
       normalize_seconds = normalize_seconds,
       lambda_update_seconds = lambda_update_seconds,
       mixture_update_seconds = mixture_update_seconds,
+      factor_posterior_var_median = if (!is.null(factor_var_diag_for_mixture)) {
+        median(factor_var_diag_for_mixture, na.rm = TRUE)
+      } else {
+        NA_real_
+      },
+      all_mixtures_converged = all_mixtures_converged,
+      iteration_rejected_by_monotone_guard = iteration_rejected_by_monotone_guard,
       objective_seconds = objective_seconds,
       iteration_seconds = iteration_seconds
     )
@@ -1097,11 +1586,16 @@ fit_binary_probit_refinement <- function(
     }
 
     n_completed <- iter
+    if (isTRUE(iteration_rejected_by_monotone_guard)) {
+      if (verbose) message("Stopping refinement after monotone-guard rejection.")
+      break
+    }
     if (!is.null(objective_tolerance) &&
         is.finite(objective_tolerance) &&
         iter >= min_refine_iter &&
         is.finite(relative_improvement) &&
-        relative_improvement <= objective_tolerance) {
+        relative_improvement <= objective_tolerance &&
+        (!isTRUE(require_mixture_convergence_for_stop) || all_mixtures_converged)) {
       converged <- TRUE
       if (verbose) {
         message(
@@ -1168,6 +1662,8 @@ fit_binary_probit_refinement <- function(
     objective_tolerance = objective_tolerance,
     min_refine_iter = min_refine_iter,
     stopping_objective = stopping_objective,
+    enforce_monotone_refinement = enforce_monotone_refinement,
+    monotone_tolerance = monotone_tolerance,
     return_best_refinement_iteration = isTRUE(return_best_refinement_iteration),
     refinement_selection_objective = refinement_selection_objective,
     selected_refinement_iteration = selected_refinement_iteration,
@@ -1177,6 +1673,7 @@ fit_binary_probit_refinement <- function(
     factor_update = factor_update,
     min_mixture_var = min_mixture_var,
     mixture_update = mixture_update,
+    mixture_refit = mixture_refit,
     mixture_prior = list(
       mu_prior_mean = mu_prior_mean,
       mu_prior_kappa = mu_prior_kappa,
@@ -1190,12 +1687,15 @@ fit_binary_probit_refinement <- function(
     lambda_penalty_history = if (length(lambda_penalty_history)) do.call(rbind, lambda_penalty_history) else NULL,
     lasso_maxit = lasso_maxit,
     lasso_tol = lasso_tol,
+    lasso_backend = lasso_backend,
+    glmnet_standardize = isTRUE(glmnet_standardize),
     normalize_factor_scale = normalize_factor_scale,
     normalize_factor_location = isTRUE(normalize_factor_location),
     factor_scale_target = factor_scale_target,
     factor_scale_method = factor_scale_method,
     preestimate_loadings = isTRUE(preestimate_loadings),
     store_refinement_trace = isTRUE(store_refinement_trace),
+    require_mixture_convergence_for_stop = isTRUE(require_mixture_convergence_for_stop),
     refinement_trace = if (isTRUE(store_refinement_trace)) {
       trace_out
     } else {
@@ -1220,10 +1720,26 @@ fit_binary_probit_pretrain_then_refine <- function(
     n_aug_iter = 4L,
     z_update = c("sample", "expectation"),
     n_refine_iter = 5L,
+    n_mix_starts = 3L,
+    mixture_max_iter = 20L,
+    mixture_update = c("map", "mle"),
+    mixture_refit = c("em", "fixed_responsibility_mstep", "posterior_moment_mstep"),
+    mu_prior_mean = 0,
+    mu_prior_kappa = 0.01,
+    var_prior_shape = 2,
+    var_prior_scale = 0.3,
+    weight_prior_alpha = 1,
+    refine_mu_prior_mean = NULL,
+    refine_mu_prior_kappa = NULL,
+    refine_var_prior_shape = NULL,
+    refine_var_prior_scale = NULL,
+    refine_weight_prior_alpha = NULL,
     factor_update = c("marginal", "conditional_soft", "conditional_hard"),
     min_mixture_var = 1e-3,
     mixture_prior_weight = 1,
     lambda_l1_penalty = 0,
+    lasso_backend = c("proximal", "glmnet"),
+    glmnet_standardize = FALSE,
     normalize_factor_scale = TRUE,
     normalize_factor_location = TRUE,
     factor_scale_target = 1,
@@ -1231,8 +1747,11 @@ fit_binary_probit_pretrain_then_refine <- function(
     objective_tolerance = 1e-5,
     min_refine_iter = 1L,
     stopping_objective = c("posterior_objective", "joint_objective", "binary_loglik", "mixture_loglik"),
+    enforce_monotone_refinement = TRUE,
+    monotone_tolerance = 1e-8,
     return_best_refinement_iteration = FALSE,
     refinement_selection_objective = c("posterior_objective", "joint_objective", "binary_loglik", "mixture_loglik"),
+    require_mixture_convergence_for_stop = FALSE,
     parallel = FALSE,
     workers = NULL,
     seed = 20260715L,
@@ -1240,9 +1759,17 @@ fit_binary_probit_pretrain_then_refine <- function(
     ...) {
   z_update <- match.arg(z_update)
   factor_update <- match.arg(factor_update)
+  mixture_update <- match.arg(mixture_update)
+  mixture_refit <- match.arg(mixture_refit)
   factor_scale_method <- match.arg(factor_scale_method)
   stopping_objective <- match.arg(stopping_objective)
   refinement_selection_objective <- match.arg(refinement_selection_objective)
+  lasso_backend <- match.arg(lasso_backend)
+  if (is.null(refine_mu_prior_mean)) refine_mu_prior_mean <- mu_prior_mean
+  if (is.null(refine_mu_prior_kappa)) refine_mu_prior_kappa <- mu_prior_kappa
+  if (is.null(refine_var_prior_shape)) refine_var_prior_shape <- var_prior_shape
+  if (is.null(refine_var_prior_scale)) refine_var_prior_scale <- var_prior_scale
+  if (is.null(refine_weight_prior_alpha)) refine_weight_prior_alpha <- weight_prior_alpha
 
   pretrain_fit <- fit_binary_probit_pretraining(
     X = X,
@@ -1251,6 +1778,14 @@ fit_binary_probit_pretrain_then_refine <- function(
     G_fixed = G_fixed,
     n_aug_iter = n_aug_iter,
     z_update = z_update,
+    n_mix_starts = n_mix_starts,
+    mixture_max_iter = mixture_max_iter,
+    mixture_update = mixture_update,
+    mu_prior_mean = mu_prior_mean,
+    mu_prior_kappa = mu_prior_kappa,
+    var_prior_shape = var_prior_shape,
+    var_prior_scale = var_prior_scale,
+    weight_prior_alpha = weight_prior_alpha,
     parallel = parallel,
     workers = workers,
     seed = seed,
@@ -1262,10 +1797,21 @@ fit_binary_probit_pretrain_then_refine <- function(
     X = X,
     pretrain_fit = pretrain_fit,
     n_refine_iter = n_refine_iter,
+    n_mix_starts = n_mix_starts,
+    mixture_max_iter = mixture_max_iter,
+    mixture_update = mixture_update,
+    mixture_refit = mixture_refit,
+    mu_prior_mean = refine_mu_prior_mean,
+    mu_prior_kappa = refine_mu_prior_kappa,
+    var_prior_shape = refine_var_prior_shape,
+    var_prior_scale = refine_var_prior_scale,
+    weight_prior_alpha = refine_weight_prior_alpha,
     factor_update = factor_update,
     min_mixture_var = min_mixture_var,
     mixture_prior_weight = mixture_prior_weight,
     lambda_l1_penalty = lambda_l1_penalty,
+    lasso_backend = lasso_backend,
+    glmnet_standardize = glmnet_standardize,
     normalize_factor_scale = normalize_factor_scale,
     normalize_factor_location = normalize_factor_location,
     factor_scale_target = factor_scale_target,
@@ -1273,8 +1819,11 @@ fit_binary_probit_pretrain_then_refine <- function(
     objective_tolerance = objective_tolerance,
     min_refine_iter = min_refine_iter,
     stopping_objective = stopping_objective,
+    enforce_monotone_refinement = enforce_monotone_refinement,
+    monotone_tolerance = monotone_tolerance,
     return_best_refinement_iteration = return_best_refinement_iteration,
     refinement_selection_objective = refinement_selection_objective,
+    require_mixture_convergence_for_stop = require_mixture_convergence_for_stop,
     parallel = parallel,
     workers = workers,
     verbose = verbose,

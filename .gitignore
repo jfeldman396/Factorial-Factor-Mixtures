@@ -11,10 +11,18 @@ __pycache__/
 *.log
 *.aux
 *.out
+*.toc
+*.synctex.gz
+*.swp
+Rplots.pdf
+tmp_render/
+writeup/**/tmp_render/
+writeup/**/tmp_rendered_pages/
 
 # Full simulation output directories can be regenerated from scripts.
 results/full/
 results/raw/
+results/diagnostics/
 data/openeval_ifeval_formatted*/
 scripts/ifeval/results/
 scripts/ifeval/Rplots.pdf

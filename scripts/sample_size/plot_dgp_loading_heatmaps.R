@@ -7,6 +7,12 @@
 
 options(stringsAsFactors = FALSE)
 
+file_arg <- commandArgs(FALSE)
+file_arg <- sub("^--file=", "", file_arg[grepl("^--file=", file_arg)])
+script_dir <- if (length(file_arg) > 0L) dirname(normalizePath(file_arg[1L])) else getwd()
+repo_root <- normalizePath(file.path(script_dir, "../.."))
+source(file.path(repo_root, "R", "sample_size_dgp.R"))
+
 get_env <- function(name, default, FUN = identity) {
   value <- Sys.getenv(name, unset = "")
   if (!nzchar(value)) return(default)
@@ -35,6 +41,7 @@ loading_designs <- c(
   sparse = "balanced_moderate_few_positive_cross",
   cross = "balanced_moderate_dense_signed_cross"
 )
+loading_designs <- normalize_sample_size_loading_design(loading_designs)
 loading_titles <- c(
   sparse = 'Loadings = "Sparse"',
   cross = 'Loadings = "Cross"'
@@ -45,93 +52,19 @@ block_size_titles <- c(
   moderate_ifeval_like = "unbalanced blocks"
 )
 
-balanced_block_sizes <- function(p, H) {
-  block_sizes <- rep(floor(p / H), H)
-  remainder <- p - sum(block_sizes)
-  if (remainder > 0L) block_sizes[seq_len(remainder)] <- block_sizes[seq_len(remainder)] + 1L
-  block_sizes
-}
-
-ifeval_like_block_sizes <- function(p, H) {
-  proportions <- switch(
-    as.character(H),
-    "3" = c(425, 31, 44) / 500,
-    "4" = c(415, 35, 18, 32) / 500,
-    rep(1 / H, H)
+make_dgp_loadings <- function(design_name, p, H) {
+  make_sample_size_loadings(
+    design = design_name,
+    p = p,
+    H = H,
+    block_size_mode = block_size_mode,
+    loading_sign_mode = "block"
   )
-  raw_sizes <- floor(p * proportions)
-  remainder <- p - sum(raw_sizes)
-  if (remainder > 0L) {
-    order_idx <- order(p * proportions - raw_sizes, decreasing = TRUE)
-    raw_sizes[order_idx[seq_len(remainder)]] <- raw_sizes[order_idx[seq_len(remainder)]] + 1L
-  }
-  pmax(raw_sizes, 1L)
-}
-
-moderate_ifeval_like_block_sizes <- function(p, H, blend_to_balanced = 0.50) {
-  ifeval_proportions <- switch(
-    as.character(H),
-    "3" = c(425, 31, 44) / 500,
-    "4" = c(415, 35, 18, 32) / 500,
-    rep(1 / H, H)
-  )
-  balanced_proportions <- rep(1 / H, H)
-  proportions <- (1 - blend_to_balanced) * ifeval_proportions +
-    blend_to_balanced * balanced_proportions
-  raw_sizes <- floor(p * proportions)
-  remainder <- p - sum(raw_sizes)
-  if (remainder > 0L) {
-    order_idx <- order(p * proportions - raw_sizes, decreasing = TRUE)
-    raw_sizes[order_idx[seq_len(remainder)]] <- raw_sizes[order_idx[seq_len(remainder)]] + 1L
-  }
-  pmax(raw_sizes, 1L)
-}
-
-make_block_sizes <- function(p, H, mode = block_size_mode) {
-  mode <- match.arg(mode, c("balanced", "ifeval_like", "moderate_ifeval_like"))
-  if (mode == "ifeval_like") return(ifeval_like_block_sizes(p, H))
-  if (mode == "moderate_ifeval_like") return(moderate_ifeval_like_block_sizes(p, H))
-  balanced_block_sizes(p, H)
-}
-
-block_sign_matrix <- function(H) {
-  signs <- matrix(sample(c(-1, 1), H * H, replace = TRUE), H, H)
-  diag(signs) <- sample(c(-1, 1), H, replace = TRUE)
-  signs
-}
-
-make_strong_same_sign_loadings <- function(design_name, p, H) {
-  block_sizes <- make_block_sizes(p, H)
-  block_id <- rep(seq_len(H), times = block_sizes)
-  signs <- block_sign_matrix(H)
-  Lambda <- matrix(0, p, H)
-
-  if (design_name == "balanced_moderate_few_positive_cross") {
-    for (j in seq_len(p)) {
-      h <- block_id[j]
-      Lambda[j, h] <- runif(1, 0.75, 1.25)
-      for (k in setdiff(seq_len(H), h)) {
-        if (runif(1) < 0.035) Lambda[j, k] <- runif(1, 0.12, 0.28)
-      }
-    }
-  } else if (design_name == "balanced_moderate_dense_signed_cross") {
-    for (j in seq_len(p)) {
-      h <- block_id[j]
-      Lambda[j, h] <- runif(1, 0.75, 1.25)
-      for (k in setdiff(seq_len(H), h)) {
-        if (runif(1) < 0.25) Lambda[j, k] <- sample(c(-1, 1), 1L) * runif(1, 0.20, 0.60)
-      }
-    }
-  } else {
-    stop("Unsupported loading design: ", design_name)
-  }
-
-  list(Lambda = Lambda, block_id = block_id, block_sizes = block_sizes)
 }
 
 make_design_lambda <- function(design_key, H, p, figure_seed) {
   set.seed(figure_seed + 1000L * H + match(design_key, names(loading_designs)))
-  make_strong_same_sign_loadings(loading_designs[[design_key]], p = p, H = H)
+  make_dgp_loadings(loading_designs[[design_key]], p = p, H = H)
 }
 
 plot_lambda_heatmap <- function(Lambda, block_id, title, out_file, zlim = c(-1.25, 1.25)) {
