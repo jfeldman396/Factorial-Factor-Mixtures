@@ -193,15 +193,15 @@ ability profiles by factor.
 
 ## Sample-Size Simulation
 
-The current final simulation uses deterministic EM-SVD likelihood pretraining
-for the proposed product-mixture method and compares it against two
-Viroli-style Gibbs samplers.  The design and algorithms are summarized in:
+The current final simulation asks when the first-stage binary signal/subspace
+estimate is accurate enough for rotation and MAP refinement.  The design and
+algorithms are summarized in:
 
 ```text
 writeup/final_simulation_design/final_simulation_design_algorithms.pdf
 ```
 
-The final launcher is:
+Run the launcher from the repository root:
 
 ```sh
 Rscript scripts/sample_size/run_final_product_viroli_simulation.R
@@ -209,18 +209,20 @@ Rscript scripts/sample_size/run_final_product_viroli_simulation.R
 
 By default this runs:
 
-- `n in {100, 200, 300, 400}`;
-- `p in {500, 1000, 2000, 4000}` for product MAP;
-- `n in {100, 200}` crossed with `p in {500, 1000}` for the Viroli
-  baselines, to control runtime;
+- `n in {100, 200}`;
+- `p in {500, 1000, 1500, 2000}` for product MAP;
+- `p in {500, 1000}` for the Viroli baselines;
 - `H in {5, 10, 15, 20}`;
 - `G in {2, 3}`, expanded to equal component counts across factors;
-- separation values `{1, 2}`;
-- 25 Monte Carlo repetitions;
-- IFEval-like unbalanced Cross loadings;
+- separation `1`;
+- loading magnitudes `Uniform(1.25, 1.75)` and `Uniform(2.50, 3.00)`;
+- cross-loading probabilities `0.075` and `0.20`;
+- randomly signed cross-loadings;
+- balanced and IFEval-like unbalanced item blocks;
+- 25 Monte Carlo repetitions per setting;
 - item intercepts using the IFEval-like intercept design;
 - loading-based sign/permutation alignment for all recovery metrics;
-- Product MAP with EM-SVD likelihood pretraining, rotation, and MAP
+- Product MAP with EM-SVD likelihood pretraining, sparse rotation, and MAP
   refinement;
 - Viroli Gibbs with a Laplace loading prior and penalty 10;
 - Viroli Gibbs with a diffuse Gaussian loading prior.
@@ -228,208 +230,135 @@ By default this runs:
 The main output folder is:
 
 ```text
-results/full/final_cross_ifeval_product_viroli
+results/full/signal_support_grid
 ```
 
-The run is resumable.  Each scenario-method pair is keyed in
-`comparison_results_checkpoint.csv`; rerunning the launcher with
-`RESUME_EXISTING=TRUE` skips completed fits.  The checkpoint records the full
-DGP setting, penalties, mixture priors, convergence diagnostics, elapsed
-seconds, ESS summaries for Gibbs draws, and DGP diagnostics such as item
-prevalence and observed joint profiles.
+The run is resumable at the task-chunk level.  Each chunk writes its own
+`comparison_results_checkpoint.csv` under
+`results/full/signal_support_grid/chunks`.  The launcher combines completed
+chunks into:
 
-### Final Simulation Smoke Test
+```text
+results/full/signal_support_grid/comparison_results.csv
+results/full/signal_support_grid/comparison_summary.csv
+```
 
-For a fast code-path check:
+These full outputs are ignored by git because they can become large.  The
+checkpoint records the full DGP setting, penalties, mixture priors,
+convergence diagnostics, elapsed seconds, Gibbs ESS summaries, item-prevalence
+diagnostics, loading support diagnostics, and product-MAP first-stage
+signal/subspace diagnostics.
+
+### Final Simulation Smoke Tests
+
+For a fast Product MAP code-path check:
 
 ```sh
-OUT_DIR=results/diagnostics/final_launcher_smoke \
 N_VALUES=20 \
-P_VALUES_PRODUCT=30 \
-P_VALUES_VIROLI=30 \
-BLOCK_SIZE_MODES=balanced \
+P_VALUES_PRODUCT=40 \
+P_VALUES_GIBBS=99999 \
 H_VALUES=2 \
 G_VALUES=2 \
-SEPARATIONS=1 \
+LOADING_STRENGTHS=weak \
+CROSS_LOADING_PROBS=0.075 \
+BLOCK_SIZE_MODES=balanced \
 REP_VALUES=1 \
-EM_SVD_ITER=3 \
-ROTATION_ITER=2 \
-REFINE_ITER=3 \
-MIXTURE_MAX_ITER=10 \
-VIROLI_ITER=20 \
-VIROLI_BURN=10 \
-VIROLI_COMPUTE_PARAMETER_ESS=FALSE \
-PARALLEL_OURS=FALSE \
-PARALLEL_GIBBS=FALSE \
-WRITE_PARAMETER_TABLES=TRUE \
+TASK_WORKERS_PRODUCT=1 \
+PRODUCT_INTERNAL_WORKERS=2 \
+RUN_LABEL=signal_support_grid_smoke \
 Rscript scripts/sample_size/run_final_product_viroli_simulation.R
 ```
 
-This smoke test only verifies the product MAP, Viroli-Laplace, and
-Viroli-Gaussian code paths.  It is not a scientific simulation.
-
-### Legacy Sampled-Z Simulation
-
-The earlier sampled-Z simulation compares:
-
-- `independent_marginal_mixture`: the proposed method with sampled augmented-probit SVD pretraining, independent marginal mixture rotation, item intercepts, and MAP refinement;
-- `joint_mixture_factor_gibbs`: a correctly specified joint-mixture factor model with `G^H` latent profiles and diagonal within-profile covariance, fitted by full Gibbs sampling with probit augmentation.
-
-The main grid is:
-
-- `H in {3, 4}`;
-- `G in {2, 3}`;
-- `n in {100, 500, 1000, 2000}`;
-- `p in {250, 500, 1000, 2000}`;
-- `25` Monte Carlo repetitions;
-- loading designs `balanced_moderate_few_positive_cross` and `balanced_moderate_dense_signed_cross`;
-- block-size modes `balanced` and `moderate_ifeval_like`;
-- item intercept mode `ifeval_like`;
-- unequal mixture variances;
-- proposed-method pretraining max iterations `10`;
-- proposed-method refinement max iterations `10`;
-- Gibbs iterations `2000`, burn-in `1000`, thin `1`, for `p in {250, 500}` only.
-
-The canonical launcher runs the balanced block grid first, then the moderately
-IFEval-like unbalanced block grid:
+To smoke-test all three method paths, use a tiny Gibbs run:
 
 ```sh
-PARALLEL_OURS=TRUE \
-PARALLEL_GIBBS=FALSE \
-PARALLEL_WORKERS=18 \
-Rscript scripts/sample_size/run_sampledZ_full_pgrid_smallp_gibbs_MAP_intercepts.R
-```
-
-Outputs are written to:
-
-```text
-results/full/sampledZ_pgrid_balanced_crossloading_smallp_gibbs_MAP_intercepts
-results/full/sampledZ_pgrid_unbalanced_crossloading_smallp_gibbs_MAP_intercepts
-```
-
-The launcher uses `RESUME_EXISTING=TRUE`, so rerunning the command resumes from
-existing checkpoint files rather than starting over.
-
-Primary outputs:
-
-- `comparison_results_checkpoint.csv`;
-- `comparison_results.csv`;
-- `comparison_summary.csv`;
-- `comparison_convergence.csv`;
-- per-repetition parameter-recovery CSV files;
-- Gibbs history CSV/PNG files for `p in {250, 500}`;
-- checkpoint/final line plots.
-
-### Run A Smoke Test
-
-For a fast check of the code path:
-
-```sh
-cd "/Users/joefeldman/Documents/Deep Factor Models/factorial-factor-mixtures"
-
-OUT_DIR=results/full/smoke_sample_size \
-H_VALUES=3 \
+N_VALUES=12 \
+P_VALUES_PRODUCT=20 \
+P_VALUES_GIBBS=20 \
+H_VALUES=2 \
 G_VALUES=2 \
-NP_GRID=n100p250:100:250 \
-LOADING_DESIGNS=balanced_moderate_few_positive_cross \
+LOADING_STRENGTHS=weak \
+CROSS_LOADING_PROBS=0.075 \
+BLOCK_SIZE_MODES=balanced \
 REP_VALUES=1 \
-PRETRAIN_AUG_ITER=3 \
-REFINE_ITER=3 \
-MFA_ITER=50 \
-MFA_BURN=25 \
-RESUME_EXISTING=FALSE \
-Rscript scripts/sample_size/compare_original_simulation_joint_mfa_gibbs.R
+TASK_WORKERS_PRODUCT=1 \
+PRODUCT_INTERNAL_WORKERS=2 \
+TASK_WORKERS_GIBBS=2 \
+VIROLI_ITER=6 \
+VIROLI_BURN=3 \
+VIROLI_COMPUTE_PARAMETER_ESS=FALSE \
+RUN_LABEL=signal_support_grid_smoke_gibbs \
+Rscript scripts/sample_size/run_final_product_viroli_simulation.R
 ```
 
-This is only a code-path check, not a scientific simulation.
+These smoke tests only verify code paths.  They are not scientific simulations.
 
 ### Parallelization
 
-The current long-run recommendation is to parallelize the proposed method with
-18 workers and keep Gibbs serial:
+The launcher uses two levels of parallelism.
 
-```sh
-PARALLEL_OURS=TRUE \
-PARALLEL_GIBBS=FALSE \
-PARALLEL_WORKERS=18 \
-Rscript scripts/sample_size/run_sampledZ_full_pgrid_smallp_gibbs_MAP_intercepts.R
+For Product MAP, the default is one task chunk at a time with 18 internal
+workers:
+
+```text
+TASK_WORKERS_PRODUCT=1
+PRODUCT_INTERNAL_WORKERS=18
 ```
 
-For the proposed product-mixture method, this parallelizes independent
-within-iteration tasks: marginal mixture fits, rotation subproblems where
-available, itemwise loading regressions, and subject-wise MAP factor-score
-updates. The outer pretraining/refinement iterations and SVD are still serial.
+Within Product MAP, internal workers are used for independent marginal mixture
+fits, itemwise loading regressions, and subject-wise factor-score updates.
+The outer EM-SVD, rotation, and refinement sweeps remain sequential.
 
-For the joint-mixture Gibbs comparator, the implementation can parallelize
-subject factor draws and item regression draws, but focused checks found this
-slower in the current R implementation because serial MCMC steps and
-worker/data-copy overhead dominate. The full grid therefore leaves Gibbs
-serial and skips Gibbs entirely for `p > 500`.
+For Viroli Gibbs, the default is six independent task chunks at a time and one
+internal Gibbs worker per chunk:
 
-### Regenerate Paper-Facing Sample-Size Figures
-
-The selected paper-facing simulation plots are generated from the checkpoint
-CSV and the exact DGP loading generator. Set `OUT_DIR` to the full simulation
-output directory you want to refresh:
-
-```sh
-OUT_DIR=results/full/sampledZ_pgrid_balanced_crossloading_smallp_gibbs_MAP_intercepts
+```text
+TASK_WORKERS_GIBBS=6
+GIBBS_INTERNAL_WORKERS=1
 ```
 
-For the moderately IFEval-like unbalanced block simulation, use:
+This parallelizes Gibbs across independent replications/configurations, which
+is usually more efficient than trying to parallelize every MCMC transition
+inside a single chain.  Increase `TASK_WORKERS_GIBBS` if memory permits.
+
+### Regenerate Simulation Figures
+
+Representative DGP heatmaps for the final loading designs:
 
 ```sh
-OUT_DIR=results/full/sampledZ_pgrid_unbalanced_crossloading_smallp_gibbs_MAP_intercepts
-```
-
-To regenerate representative DGP loading heatmaps for `Loadings = "Sparse"`
-and `Loadings = "Cross"` at `H = 3, 4`:
-
-```sh
-OUT_DIR=$OUT_DIR \
 Rscript scripts/sample_size/plot_dgp_loading_heatmaps.R
 ```
 
-To regenerate the six-panel recovery figures for each loading/H/G setting:
+This writes PNG heatmaps to:
 
-```sh
-OUT_DIR=$OUT_DIR \
-Rscript scripts/sample_size/plot_sample_size_rmse_panels.R
+```text
+results/selected_plots/sample_size/signal_support_grid/dgp_heatmaps
 ```
 
-These figures report RMSE for item intercepts, loadings, mixture means,
-mixture variances, mixture weights, and factor scores. The mixture-weight RMSE
-is computed by vectorizing the aligned joint-profile weights and taking the
-RMSE against the true profile weights.
+and matching loading matrices to:
 
-For method-comparison RMSE panels, colors distinguish methods and line types
-distinguish the two dimensions where both methods are fit: dotted lines are
-`p = 250` and solid lines are `p = 500`. Larger `p` values are product-mixture
-only in the full simulation and are therefore excluded from those direct
-Gibbs-vs-product panels.
-
-To regenerate the product-mixture factor-score convergence plots across `n`,
-with separate colored lines for each `p`:
-
-```sh
-Rscript scripts/sample_size/plot_factor_score_rmse_by_n_product_by_p.R
+```text
+results/selected_tables/sample_size/signal_support_grid_dgp
 ```
 
-These figures use the committed aggregate result CSVs in
-`results/selected_tables/sample_size`, color lines by `p`, and plot
-mean factor-score RMSE with `+/- 2` standard deviations across repetitions.
-
-To regenerate runtime figures:
+Progress plots from completed chunks:
 
 ```sh
-OUT_DIR=$OUT_DIR \
-Rscript scripts/sample_size/plot_sample_size_timing_lines.R
+Rscript scripts/sample_size/plot_signal_support_simulation_progress.R
 ```
 
-These figures plot mean `log(seconds)` with `+/- 2` standard deviations across
-Monte Carlo repetitions. The `seconds` field is total elapsed wall-clock time
-for each method fit; for the Gibbs comparator it includes the configured 2000
-Gibbs iterations and 1000 burn-in iterations.
+This reads `results/full/signal_support_grid`, writes a completed-results
+snapshot to:
+
+```text
+results/selected_tables/sample_size/signal_support_grid_completed_results.csv
+```
+
+and writes line/boxplot summaries under:
+
+```text
+results/selected_plots/sample_size/signal_support_grid
+```
 
 ### Interpret Simulation Metrics
 
@@ -442,29 +371,34 @@ Important fields:
 - `factor_score_rmse`: RMSE between aligned estimated and true factor scores.
 - `lambda_rmse`: RMSE between aligned estimated and true loading entries.
 - `alpha_rmse`: RMSE between estimated and true item intercepts.
-- `mixture_mu_rmse`: RMSE between estimated and true marginal mixture means.
-- `mixture_var_rmse`: RMSE between estimated and true marginal mixture variances.
-- `mixture_weight_rmse`: RMSE between vectorized aligned joint-profile weights.
+- `marginal_mu_rmse`: RMSE between estimated and true marginal mixture means.
+- `marginal_var_rmse`: RMSE between estimated and true marginal mixture variances.
+- `marginal_weight_rmse`: RMSE between estimated and true marginal mixture weights.
+- `stage1_signal_relative_frobenius_error`: relative error in the first-stage
+  centered low-rank probit signal for Product MAP.
+- `stage1_sinTheta_op`: operator-norm subspace angle error for the first-stage
+  signal estimate.
 - `seconds`: wall-clock runtime for the method in that repetition.
+- `ess_min`, `ess_median`, `ess_mean`: Gibbs effective sample size summaries
+  when ESS calculation is enabled.
 
-For `G = 3`, variance recovery can be sensitive to saturated binary item
-blocks, so inspect variance RMSE together with the generated DGP Lambda
-heatmaps and factor-score RMSE.
+The DGP columns `dgp_min_total_nonzero_loadings_by_factor`,
+`dgp_mean_cross_loadings_per_item`, `dgp_min_loading_l2_by_factor`, and related
+fields connect recovery to effective signal strength and loading support.
 
 ## Committed Selected Results
 
-Selected outputs from prior runs are committed for immediate inspection:
+Selected outputs are committed for immediate inspection:
 
-- sample-size plots: `results/selected_plots/sample_size`;
-- sample-size tables: `results/selected_tables/sample_size`;
-- aggregate raw sample-size results:
-  `results/selected_tables/sample_size/balanced_sampledZ_pgrid_product_allp_gibbs_smallp_comparison_results.csv`
-  and
-  `results/selected_tables/sample_size/unbalanced_sampledZ_pgrid_product_allp_gibbs_smallp_comparison_results.csv`;
+- final simulation DGP heatmaps:
+  `results/selected_plots/sample_size/signal_support_grid/dgp_heatmaps`;
+- final simulation representative Lambda matrices:
+  `results/selected_tables/sample_size/signal_support_grid_dgp`;
 - IFEval plots: `results/selected_plots/ifeval`;
 - IFEval tables: `results/selected_tables/ifeval`;
-- IFEval writeups: `writeup/ifeval_analysis_writeup.pdf` and
-  `writeup/ifeval_componentwise_G3313.pdf`.
+- IFEval writeup: `writeup/ifeval_componentwise_G3313.pdf`;
+- simulation design writeup:
+  `writeup/final_simulation_design/final_simulation_design_algorithms.pdf`.
 
 The latest static audit notes are in `CODE_AUDIT.md`. They record which R files
 were parsed, which input files were checked, which PDF was rendered, and which

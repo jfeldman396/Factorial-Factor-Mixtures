@@ -4,8 +4,8 @@ This repository collects the reproducible code, selected results, and writeups f
 
 The current contents are organized around two analysis tracks:
 
-1. `experiments/sample_size_intercepts_centered`: simulations comparing the proposed binary probit independent-mixture factor method against a correctly specified joint-mixture factor analyzer with probit augmentation and full Gibbs sampling.
-2. `experiments/ifeval`: IFEval rank, component-count, and sparsity selection by held-out predictive likelihood, followed by factor interpretation/visualization for the selected mixture model.
+1. `scripts/sample_size`: simulations comparing the proposed binary probit independent-mixture factor method against Viroli-style probit Gibbs baselines.
+2. `scripts/ifeval`: IFEval rank, component-count, and sparsity selection by held-out predictive likelihood, followed by factor interpretation/visualization for the selected mixture model.
 
 The main implementation lives in `R/`. Runnable scripts are kept under `scripts/` and source the shared implementation so the simulation and IFEval analyses use the same fitting code.
 
@@ -17,22 +17,25 @@ static audit notes and reproducibility caveats.
 
 The active sample-size experiment uses:
 
-- `H in {3, 4}`
-- `G in {2, 3}`
-- `n in {100, 500, 1000, 2000}`
-- `p in {250, 500, 1000, 2000}`
+- `n in {100, 200}`
+- `p in {500, 1000, 1500, 2000}` for product MAP
+- `p in {500, 1000}` for the Viroli Gibbs baselines
+- `H in {5, 10, 15, 20}`
+- `G in {2, 3}`, applied to every factor coordinate
 - `25` Monte Carlo repetitions per setting
-- two loading designs: `few-positive-cross` and `dense-signed-cross`
-- balanced and moderately IFEval-like unbalanced item blocks
+- Cross/IFEval-like loadings with randomly signed cross-loadings
+- loading magnitudes `Uniform(1.25, 1.75)` or `Uniform(2.50, 3.00)`
+- cross-loading probability `0.075` or `0.20`
+- balanced and IFEval-like unbalanced item blocks
 - item intercepts generated in an IFEval-like pattern
-- centered augmented probit SVD initialization
-- sampled augmented `Z` updates during pretraining
-- MAP refinement for the proposed method
-- 2000 Gibbs iterations for the joint-mixture comparator, with 1000 burn-in draws, only for `p in {250, 500}`
+- product MAP with EM-SVD probit signal pretraining, sparse rotation, and MAP refinement
+- Viroli-style probit Gibbs with either a Laplace loading prior or a diffuse Gaussian loading prior
 
-Selected design heatmaps, RMSE panels, timing summaries, and aggregate raw
-result CSVs are stored in `results/selected_plots/sample_size` and
-`results/selected_tables/sample_size`.
+The launcher is
+`scripts/sample_size/run_final_product_viroli_simulation.R`.  The raw full
+outputs are written to `results/full/signal_support_grid` and are ignored by
+git.  Selected design heatmaps, progress plots, and summary CSVs are stored in
+`results/selected_plots/sample_size` and `results/selected_tables/sample_size`.
 
 ## IFEval Analysis
 

@@ -499,6 +499,449 @@ initialize_viroli_probit_state <- function(X, H, G, seed = 1L) {
        pi = sorted$pi, mu = sorted$mu, sig2 = sorted$sig2)
 }
 
+viroli_sample_component_rows <- function(prob) {
+  prob <- as.matrix(prob)
+  prob[!is.finite(prob) | prob < 0] <- 0
+  row_total <- rowSums(prob)
+  bad <- !is.finite(row_total) | row_total <= 0
+  if (any(bad)) prob[bad, ] <- 1 / ncol(prob)
+  prob[!bad, ] <- prob[!bad, , drop = FALSE] / row_total[!bad]
+  cumprob <- t(apply(prob, 1L, cumsum))
+  1L + rowSums(runif(nrow(prob)) > cumprob)
+}
+
+viroli_mixture_matrices_from_fit <- function(fit, H, G, min_var = 0.05) {
+  G <- normalize_G_fixed(G, H)
+  G_max <- max(G)
+  pi_mat <- matrix(NA_real_, H, G_max)
+  mu_mat <- matrix(NA_real_, H, G_max)
+  sig2_mat <- matrix(NA_real_, H, G_max)
+
+  if (!is.null(fit$mixture_fits)) {
+    for (h in seq_len(H)) {
+      Gh <- G[h]
+      fit_h <- fit$mixture_fits[[h]]
+      pi_h <- as.numeric(fit_h$pi[seq_len(Gh)])
+      mu_h <- as.numeric(fit_h$mu[seq_len(Gh)])
+      var_h <- if (!is.null(fit_h$var)) {
+        as.numeric(fit_h$var[seq_len(Gh)])
+      } else {
+        as.numeric(fit_h$sd[seq_len(Gh)]^2)
+      }
+      pi_h[!is.finite(pi_h) | pi_h < 0] <- 0
+      if (sum(pi_h) <= 0) pi_h <- rep(1 / Gh, Gh)
+      pi_mat[h, seq_len(Gh)] <- pi_h / sum(pi_h)
+      mu_mat[h, seq_len(Gh)] <- mu_h
+      sig2_mat[h, seq_len(Gh)] <- pmax(var_h, min_var)
+    }
+  } else if (!is.null(fit$pi) && !is.null(fit$mu) && !is.null(fit$sig2)) {
+    pi_mat[, seq_len(ncol(as.matrix(fit$pi)))] <- as.matrix(fit$pi)
+    mu_mat[, seq_len(ncol(as.matrix(fit$mu)))] <- as.matrix(fit$mu)
+    sig2_mat[, seq_len(ncol(as.matrix(fit$sig2)))] <- as.matrix(fit$sig2)
+    sig2_mat <- pmax(sig2_mat, min_var)
+  } else {
+    return(NULL)
+  }
+
+  list(pi = pi_mat, mu = mu_mat, sig2 = sig2_mat)
+}
+
+initialize_viroli_probit_state_from_fit <- function(
+    X,
+    H,
+    G,
+    fit,
+    seed = 1L,
+    allocation = c("sample", "map"),
+    min_var = 0.05,
+    normalize = TRUE,
+    min_scale = 1e-4) {
+  # Warm-start the Gibbs chain from a deterministic fit such as product MAP.
+  # This changes only the initial state; subsequent draws target the same
+  # posterior as the ordinary Viroli sampler.
+  set.seed(seed)
+  allocation <- match.arg(allocation)
+  X <- as.matrix(X)
+  n <- nrow(X)
+  p <- ncol(X)
+  G <- normalize_G_fixed(G, H)
+  G_max <- max(G)
+
+  F <- as.matrix(fit$F_hat)
+  Lambda <- as.matrix(fit$Lambda_hat)
+  alpha <- as.numeric(fit$alpha_hat)
+  if (!identical(dim(F), c(n, H))) stop("initial_state$F_hat must be n by H.")
+  if (!identical(dim(Lambda), c(p, H))) stop("initial_state$Lambda_hat must be p by H.")
+  if (length(alpha) != p || any(!is.finite(alpha))) stop("initial_state$alpha_hat must have length p.")
+
+  mix <- viroli_mixture_matrices_from_fit(fit, H = H, G = G, min_var = min_var)
+  if (is.null(mix)) {
+    C0 <- matrix(NA_integer_, n, H)
+    pi_mat <- matrix(NA_real_, H, G_max)
+    mu_mat <- matrix(NA_real_, H, G_max)
+    sig2_mat <- matrix(NA_real_, H, G_max)
+    for (h in seq_len(H)) {
+      Gh <- G[h]
+      km <- try(kmeans(F[, h], centers = Gh, nstart = 10, iter.max = 50), silent = TRUE)
+      C0[, h] <- if (inherits(km, "try-error")) sample.int(Gh, n, replace = TRUE) else km$cluster
+      for (g in seq_len(Gh)) {
+        idx <- which(C0[, h] == g)
+        pi_mat[h, g] <- max(length(idx) / n, 1e-4)
+        mu_mat[h, g] <- if (length(idx)) mean(F[idx, h]) else 0
+        sig2_mat[h, g] <- if (length(idx) > 1L) max(var(F[idx, h]), min_var) else 1
+      }
+      pi_mat[h, seq_len(Gh)] <- pi_mat[h, seq_len(Gh)] / sum(pi_mat[h, seq_len(Gh)])
+    }
+  } else {
+    pi_mat <- mix$pi
+    mu_mat <- mix$mu
+    sig2_mat <- mix$sig2
+  }
+
+  if (isTRUE(normalize)) {
+    normalized <- normalize_viroli_draw(
+      F = F,
+      alpha = alpha,
+      Lambda = Lambda,
+      pi_mat = pi_mat,
+      mu_mat = mu_mat,
+      sig2_mat = sig2_mat,
+      G = G,
+      min_scale = min_scale
+    )
+    F <- normalized$F
+    alpha <- normalized$alpha
+    Lambda <- normalized$Lambda
+    pi_mat <- normalized$pi
+    mu_mat <- normalized$mu
+    sig2_mat <- normalized$sig2
+  }
+
+  C <- matrix(NA_integer_, n, H)
+  for (h in seq_len(H)) {
+    Gh <- G[h]
+    fit_h <- list(
+      pi = pi_mat[h, seq_len(Gh)],
+      mu = mu_mat[h, seq_len(Gh)],
+      var = pmax(sig2_mat[h, seq_len(Gh)], min_var)
+    )
+    resp <- mixture_responsibilities(F[, h], fit_h)
+    C[, h] <- if (allocation == "map") {
+      max.col(resp, ties.method = "first")
+    } else {
+      viroli_sample_component_rows(resp)
+    }
+  }
+
+  sorted <- sort_viroli_components(C, pi_mat, mu_mat, sig2_mat, G)
+  Z <- viroli_sample_binary_Z(X, F, Lambda, alpha)
+  list(
+    Z = Z,
+    F = F,
+    C = sorted$C,
+    alpha = alpha,
+    Lambda = Lambda,
+    pi = sorted$pi,
+    mu = sorted$mu,
+    sig2 = sorted$sig2
+  )
+}
+
+viroli_svd_rotated_pretrain_object <- function(
+    X,
+    H,
+    G,
+    state,
+    rotation_loading_l1_penalty = 0,
+    rotation_random_starts = 3L,
+    rotation_ica_starts = 0L,
+    rotation_ica_functions = c("logcosh", "exp"),
+    rotation_ica_max_iter = 200L,
+    rotation_ica_tol = 1e-4,
+    rotation_max_outer = 5L,
+    n_mix_starts = 5L,
+    mixture_max_iter = 50L,
+    mixture_update = c("map", "mle"),
+    mu_prior_mean = 0,
+    mu_prior_kappa = 0.01,
+    var_prior_shape = 2,
+    var_prior_scale = 1.5,
+    weight_prior_alpha = 1,
+    grid_size = 31L,
+    rotation_objective_tolerance = 1e-4,
+    rotation_min_outer = 2L,
+    require_mixture_convergence_for_rotation_stop = TRUE,
+    rotation_optimizer = c("riemannian", "givens"),
+    rotation_sweep = c("full", "hybrid", "multi_disjoint", "disjoint", "promising"),
+    riemannian_rotation_steps = 10L,
+    riemannian_eta0 = 1,
+    riemannian_beta = 0.5,
+    riemannian_min_eta = 1e-8,
+    riemannian_grad_tol = 1e-6,
+    riemannian_update = c("cayley", "expm"),
+    seed = 1L,
+    parallel = FALSE,
+    workers = NULL,
+    verbose = FALSE) {
+  # Use the Viroli sampled-Z SVD factors as the factor basis, then apply the
+  # same independent-mixture rotation used by the product MAP pretraining.
+  if (!exists("rotate_em_svd_scores_with_mixtures", mode = "function", inherits = TRUE)) {
+    stop("rotate_em_svd_scores_with_mixtures() must be sourced before Viroli-SVD rotation.")
+  }
+  X <- as.matrix(X)
+  H <- as.integer(H)
+  G <- normalize_G_fixed(G, H)
+  mixture_update <- match.arg(mixture_update)
+  rotation_optimizer <- match.arg(rotation_optimizer)
+  rotation_sweep <- match.arg(rotation_sweep)
+  riemannian_update <- match.arg(riemannian_update)
+
+  rotation <- rotate_em_svd_scores_with_mixtures(
+    S = as.matrix(state$F),
+    G_fixed = G,
+    loading_basis = as.matrix(state$Lambda),
+    rotation_loading_l1_penalty = rotation_loading_l1_penalty,
+    n_random_starts = rotation_random_starts,
+    n_ica_starts = rotation_ica_starts,
+    ica_functions = rotation_ica_functions,
+    ica_max_iter = rotation_ica_max_iter,
+    ica_tol = rotation_ica_tol,
+    max_outer = rotation_max_outer,
+    n_mix_starts = n_mix_starts,
+    mixture_max_iter = mixture_max_iter,
+    mixture_update = mixture_update,
+    mu_prior_mean = mu_prior_mean,
+    mu_prior_kappa = mu_prior_kappa,
+    var_prior_shape = var_prior_shape,
+    var_prior_scale = var_prior_scale,
+    weight_prior_alpha = weight_prior_alpha,
+    grid_size = grid_size,
+    rotation_objective_tolerance = rotation_objective_tolerance,
+    rotation_min_outer = rotation_min_outer,
+    require_mixture_convergence_for_rotation_stop = require_mixture_convergence_for_rotation_stop,
+    rotation_optimizer = rotation_optimizer,
+    rotation_sweep = rotation_sweep,
+    riemannian_rotation_steps = riemannian_rotation_steps,
+    riemannian_eta0 = riemannian_eta0,
+    riemannian_beta = riemannian_beta,
+    riemannian_min_eta = riemannian_min_eta,
+    riemannian_grad_tol = riemannian_grad_tol,
+    riemannian_update = riemannian_update,
+    seed = seed,
+    parallel = parallel,
+    workers = workers,
+    verbose = verbose
+  )
+
+  F_hat <- rotation$F_hat
+  Lambda_hat <- as.matrix(state$Lambda) %*% rotation$R
+  alpha_hat <- as.numeric(state$alpha)
+  rownames(Lambda_hat) <- colnames(X)
+  colnames(Lambda_hat) <- paste0("factor_", seq_len(H))
+
+  responsibilities <- lapply(seq_len(H), function(h) {
+    mixture_responsibilities(F_hat[, h], rotation$fits[[h]])
+  })
+  class_map <- sapply(responsibilities, max.col, ties.method = "first")
+  if (H == 1L) class_map <- matrix(class_map, ncol = 1L)
+  colnames(class_map) <- paste0("factor_", seq_len(H))
+
+  fitted <- sweep(F_hat %*% t(Lambda_hat), 2L, alpha_hat, "+")
+  list(
+    model = "viroli_sampled_z_svd_rotated_pretraining",
+    X = X,
+    H = H,
+    H_selection = NULL,
+    H_selection_strategy = "fixed_supplied_H",
+    S = as.matrix(state$F),
+    R = rotation$R,
+    F_hat = F_hat,
+    Lambda_hat = Lambda_hat,
+    Lambda_ls = Lambda_hat,
+    alpha_hat = alpha_hat,
+    mixture_fits = rotation$fits,
+    G_hat = rotation$G_hat,
+    G_fixed = G,
+    pretrain_G_selection = "fixed",
+    mixture_update = mixture_update,
+    rotation_optimizer = rotation_optimizer,
+    rotation_fit = rotation,
+    responsibilities = responsibilities,
+    class_map = class_map,
+    profile_id = binary_profile_id(class_map),
+    fitted = fitted,
+    residual = state$Z - fitted,
+    Psi_hat = diag(1, ncol(X)),
+    Psi_hat_unconstrained = diag(pmax(colMeans((state$Z - fitted)^2), 1e-4), ncol(X)),
+    history = data.frame(
+      stage = "viroli_sampled_z_svd_rotation",
+      iteration = rotation$rotation_completed_outer,
+      mixture_loglik = rotation$loglik,
+      objective = rotation$selection_score,
+      stringsAsFactors = FALSE
+    ),
+    pretraining_converged = isTRUE(rotation$rotation_converged),
+    pretraining_completed_iter = rotation$rotation_completed_outer,
+    selected_pretraining_iteration = rotation$rotation_completed_outer,
+    rotation_completed_outer = rotation$rotation_completed_outer,
+    rotation_converged = isTRUE(rotation$rotation_converged),
+    rotation_history = rotation$rotation_history,
+    rotation_step_history = rotation$rotation_step_history,
+    rotation_start_name = rotation$start_name,
+    z_update = "viroli_sampled_z_svd",
+    fix_psi_identity = TRUE,
+    estimate_intercept = TRUE
+  )
+}
+
+fit_binary_probit_viroli_svd_rotate_then_refine <- function(
+    X,
+    H,
+    G_fixed,
+    n_refine_iter = 5L,
+    n_mix_starts = 3L,
+    mixture_max_iter = 20L,
+    mixture_update = c("map", "mle"),
+    mixture_refit = c("em", "fixed_responsibility_mstep", "posterior_moment_mstep"),
+    mu_prior_mean = 0,
+    mu_prior_kappa = 0.01,
+    var_prior_shape = 2,
+    var_prior_scale = 0.3,
+    weight_prior_alpha = 1,
+    refine_mu_prior_mean = NULL,
+    refine_mu_prior_kappa = NULL,
+    refine_var_prior_shape = NULL,
+    refine_var_prior_scale = NULL,
+    refine_weight_prior_alpha = NULL,
+    factor_update = c("marginal", "conditional_soft", "conditional_hard"),
+    min_mixture_var = 1e-3,
+    lambda_l1_penalty = 0,
+    lasso_backend = c("proximal", "glmnet"),
+    glmnet_standardize = FALSE,
+    objective_tolerance = 1e-5,
+    min_refine_iter = 1L,
+    enforce_monotone_refinement = TRUE,
+    monotone_tolerance = 1e-8,
+    return_best_refinement_iteration = FALSE,
+    refinement_selection_objective = c("posterior_objective", "joint_objective", "binary_loglik", "mixture_loglik"),
+    require_mixture_convergence_for_stop = FALSE,
+    rotation_loading_l1_penalty = 0,
+    rotation_random_starts = 3L,
+    rotation_ica_starts = 0L,
+    rotation_ica_functions = c("logcosh", "exp"),
+    rotation_ica_max_iter = 200L,
+    rotation_ica_tol = 1e-4,
+    rotation_max_outer = 5L,
+    grid_size = 31L,
+    rotation_objective_tolerance = 1e-4,
+    rotation_min_outer = 2L,
+    require_mixture_convergence_for_rotation_stop = TRUE,
+    rotation_optimizer = c("riemannian", "givens"),
+    rotation_sweep = c("full", "hybrid", "multi_disjoint", "disjoint", "promising"),
+    riemannian_rotation_steps = 10L,
+    riemannian_eta0 = 1,
+    riemannian_beta = 0.5,
+    riemannian_min_eta = 1e-8,
+    riemannian_grad_tol = 1e-6,
+    riemannian_update = c("cayley", "expm"),
+    seed = 1L,
+    parallel = FALSE,
+    workers = NULL,
+    verbose = FALSE,
+    ...) {
+  # Exact ablation requested in the high-H comparisons: initialize our product
+  # MAP pipeline at the same sampled-Z SVD factors used by Viroli, then rotate
+  # those factors before ordinary MAP refinement.
+  mixture_update <- match.arg(mixture_update)
+  mixture_refit <- match.arg(mixture_refit)
+  factor_update <- match.arg(factor_update)
+  refinement_selection_objective <- match.arg(refinement_selection_objective)
+  lasso_backend <- match.arg(lasso_backend)
+  rotation_optimizer <- match.arg(rotation_optimizer)
+  rotation_sweep <- match.arg(rotation_sweep)
+  riemannian_update <- match.arg(riemannian_update)
+  if (is.null(refine_mu_prior_mean)) refine_mu_prior_mean <- mu_prior_mean
+  if (is.null(refine_mu_prior_kappa)) refine_mu_prior_kappa <- mu_prior_kappa
+  if (is.null(refine_var_prior_shape)) refine_var_prior_shape <- var_prior_shape
+  if (is.null(refine_var_prior_scale)) refine_var_prior_scale <- var_prior_scale
+  if (is.null(refine_weight_prior_alpha)) refine_weight_prior_alpha <- weight_prior_alpha
+
+  state <- initialize_viroli_probit_state(
+    X = X,
+    H = H,
+    G = G_fixed,
+    seed = seed
+  )
+  pretrain_fit <- viroli_svd_rotated_pretrain_object(
+    X = X,
+    H = H,
+    G = G_fixed,
+    state = state,
+    rotation_loading_l1_penalty = rotation_loading_l1_penalty,
+    rotation_random_starts = rotation_random_starts,
+    rotation_ica_starts = rotation_ica_starts,
+    rotation_ica_functions = rotation_ica_functions,
+    rotation_ica_max_iter = rotation_ica_max_iter,
+    rotation_ica_tol = rotation_ica_tol,
+    rotation_max_outer = rotation_max_outer,
+    n_mix_starts = n_mix_starts,
+    mixture_max_iter = mixture_max_iter,
+    mixture_update = mixture_update,
+    mu_prior_mean = mu_prior_mean,
+    mu_prior_kappa = mu_prior_kappa,
+    var_prior_shape = var_prior_shape,
+    var_prior_scale = var_prior_scale,
+    weight_prior_alpha = weight_prior_alpha,
+    grid_size = grid_size,
+    rotation_objective_tolerance = rotation_objective_tolerance,
+    rotation_min_outer = rotation_min_outer,
+    require_mixture_convergence_for_rotation_stop = require_mixture_convergence_for_rotation_stop,
+    rotation_optimizer = rotation_optimizer,
+    rotation_sweep = rotation_sweep,
+    riemannian_rotation_steps = riemannian_rotation_steps,
+    riemannian_eta0 = riemannian_eta0,
+    riemannian_beta = riemannian_beta,
+    riemannian_min_eta = riemannian_min_eta,
+    riemannian_grad_tol = riemannian_grad_tol,
+    riemannian_update = riemannian_update,
+    seed = seed + 10000L,
+    parallel = parallel,
+    workers = workers,
+    verbose = verbose
+  )
+  refine_fit <- fit_binary_probit_refinement(
+    X = X,
+    pretrain_fit = pretrain_fit,
+    n_refine_iter = n_refine_iter,
+    n_mix_starts = n_mix_starts,
+    mixture_max_iter = mixture_max_iter,
+    mixture_update = mixture_update,
+    mixture_refit = mixture_refit,
+    mu_prior_mean = refine_mu_prior_mean,
+    mu_prior_kappa = refine_mu_prior_kappa,
+    var_prior_shape = refine_var_prior_shape,
+    var_prior_scale = refine_var_prior_scale,
+    weight_prior_alpha = refine_weight_prior_alpha,
+    factor_update = factor_update,
+    min_mixture_var = min_mixture_var,
+    lambda_l1_penalty = lambda_l1_penalty,
+    lasso_backend = lasso_backend,
+    glmnet_standardize = glmnet_standardize,
+    objective_tolerance = objective_tolerance,
+    min_refine_iter = min_refine_iter,
+    enforce_monotone_refinement = enforce_monotone_refinement,
+    monotone_tolerance = monotone_tolerance,
+    return_best_refinement_iteration = return_best_refinement_iteration,
+    refinement_selection_objective = refinement_selection_objective,
+    require_mixture_convergence_for_stop = require_mixture_convergence_for_stop,
+    parallel = parallel,
+    workers = workers,
+    verbose = verbose,
+    ...
+  )
+  list(pretrain_fit = pretrain_fit, refine_fit = refine_fit)
+}
+
 fit_viroli_probit_independent_gibbs <- function(
     X,
     H,
@@ -522,8 +965,11 @@ fit_viroli_probit_independent_gibbs <- function(
     parallel = FALSE,
     workers = NULL,
     compute_parameter_ess = TRUE,
+    initial_state = NULL,
+    initial_allocation = c("sample", "map"),
     seed = 1L,
     verbose = TRUE) {
+  initial_allocation <- match.arg(initial_allocation)
   set.seed(seed)
   X <- as.matrix(X)
   n <- nrow(X)
@@ -531,7 +977,23 @@ fit_viroli_probit_independent_gibbs <- function(
   G <- normalize_G_fixed(G, H)
   G_max <- max(G)
 
-  state <- initialize_viroli_probit_state(X, H = H, G = G, seed = seed)
+  if (is.null(initial_state)) {
+    state <- initialize_viroli_probit_state(X, H = H, G = G, seed = seed)
+    initialization <- "augmented_svd"
+  } else {
+    state <- initialize_viroli_probit_state_from_fit(
+      X = X,
+      H = H,
+      G = G,
+      fit = initial_state,
+      seed = seed,
+      allocation = initial_allocation,
+      min_var = min_var,
+      normalize = normalize_each_draw,
+      min_scale = min_scale
+    )
+    initialization <- "external_fit"
+  }
   Z <- state$Z
   F <- state$F
   C <- state$C
@@ -793,6 +1255,8 @@ fit_viroli_probit_independent_gibbs <- function(
     ess_summary = ess_summary,
     n_keep = n_keep,
     G = G,
+    initialization = initialization,
+    initial_allocation = if (is.null(initial_state)) NA_character_ else initial_allocation,
     normalize_each_draw = normalize_each_draw,
     lambda_l1_penalty = lambda_l1_penalty,
     loading_prior = if (isTRUE(use_laplace_loading_prior)) "bayesian_lasso_scale_mixture" else "normal",

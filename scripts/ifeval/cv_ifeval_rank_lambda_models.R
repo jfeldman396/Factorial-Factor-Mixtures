@@ -40,16 +40,25 @@ parse_num_grid <- function(x, default) {
 
 expand_columnwise_G_configs <- function(H,
                                         component_values = c(2L, 3L),
-                                        max_gaussian_coords = 0L) {
+                                        max_gaussian_coords = 0L,
+                                        unique_up_to_permutation = FALSE) {
   # Enumerate all per-factor component-count vectors.  For H = 4 and
   # component_values = c(2, 3), this returns the 16 vectors in {2,3}^4.
   # If component_values includes 1, max_gaussian_coords limits how many
   # coordinates are allowed to be Gaussian rather than non-Gaussian mixtures.
+  # When unique_up_to_permutation is TRUE, retain only sorted component-count
+  # multisets.  This avoids refitting likelihood-equivalent models that differ
+  # only by factor-coordinate labels, e.g. (3,3,1,3) versus (3,1,3,3).
   grid <- expand.grid(rep(list(as.integer(component_values)), H))
   configs <- lapply(seq_len(nrow(grid)), function(i) as.integer(grid[i, ]))
   max_gaussian_coords <- as.integer(max_gaussian_coords)
   if (any(as.integer(component_values) == 1L) && is.finite(max_gaussian_coords)) {
     configs <- Filter(function(G) sum(G == 1L) <= max_gaussian_coords, configs)
+  }
+  if (isTRUE(unique_up_to_permutation)) {
+    sorted_labels <- vapply(configs, function(G) paste(sort(G), collapse = ","), character(1L))
+    configs <- configs[!duplicated(sorted_labels)]
+    configs <- lapply(configs, sort)
   }
   configs
 }
@@ -534,7 +543,10 @@ write_cv_plots <- function(summary_scores, out_dir) {
     png(file.path(out_dir, "rank_lambda_top_candidates_by_heldout_ll.png"),
         width = 2400, height = 1700, res = 170)
     op <- par(mar = c(5, 10, 3, 1))
-    on.exit(par(op), add = TRUE)
+    on.exit({
+      par(op)
+      dev.off()
+    }, add = TRUE)
     labels <- sprintf(
       "H=%s; G=[%s]; lambda=%s; folds=%s",
       top$H,
@@ -551,7 +563,6 @@ write_cv_plots <- function(summary_scores, out_dir) {
     )
     abline(v = max(top$mean_heldout_loglik_per_response, na.rm = TRUE),
            col = "#B23A48", lty = 2)
-    dev.off()
     return(invisible(NULL))
   }
 
@@ -559,7 +570,10 @@ write_cv_plots <- function(summary_scores, out_dir) {
       width = 2200, height = 1200, res = 170)
   nr <- ceiling(np / 2)
   op <- par(mfrow = c(nr, 2), mar = c(4, 4.2, 3, 1), oma = c(0, 0, 2, 0))
-  on.exit(par(op), add = TRUE)
+  on.exit({
+    par(op)
+    dev.off()
+  }, add = TRUE)
   cols <- c("#355C9A", "#B23A48", "#2A9D8F", "#6D597A", "#E9A03F", "#4A5568")
   for (nm in names(panels)) {
     d <- panels[[nm]]
@@ -578,8 +592,6 @@ write_cv_plots <- function(summary_scores, out_dir) {
            bty = "n")
   }
   title("IFEval rank/penalty CV; larger held-out log likelihood is better", outer = TRUE)
-  dev.off()
-
 }
 
 refresh_outputs <- function(scores_path, out_dir) {
@@ -646,6 +658,10 @@ G_component_values <- parse_int_grid(
   default = c(2L, 3L)
 )
 max_gaussian_coords <- as.integer(Sys.getenv("MAX_GAUSSIAN_COORDS", "0"))
+unique_G_up_to_permutation <- isTRUE(
+  tolower(Sys.getenv("UNIQUE_G_CONFIGS_UP_TO_PERMUTATION", "FALSE")) %in%
+    c("true", "1", "yes")
+)
 lambda_grid <- parse_num_grid(Sys.getenv("LAMBDA_L1_GRID"), default = c(0, 1, 2, 4, 8, 12))
 K_folds <- as.integer(Sys.getenv("K_FOLDS", "3"))
 workers <- resolve_workers(as.integer(Sys.getenv("WORKERS", "6")))
@@ -715,6 +731,7 @@ message("G mode: ", G_mode)
 if (G_mode == "column_grid") {
   message("Columnwise component values: ", paste(G_component_values, collapse = ", "))
   message("Max Gaussian coordinates: ", max_gaussian_coords)
+  message("Unique G configs up to permutation: ", unique_G_up_to_permutation)
 }
 message("lambda_l1 grid: ", paste(lambda_grid, collapse = ", "))
 message("Folds: ", K_folds, "; MAP refinement; workers=", workers)
@@ -728,7 +745,8 @@ for (G in G_grid) {
       expand_columnwise_G_configs(
         H,
         component_values = G_component_values,
-        max_gaussian_coords = max_gaussian_coords
+        max_gaussian_coords = max_gaussian_coords,
+        unique_up_to_permutation = unique_G_up_to_permutation
       )
     } else {
       list(rep(as.integer(G), H))

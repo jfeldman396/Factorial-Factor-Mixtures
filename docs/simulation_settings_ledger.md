@@ -108,7 +108,7 @@ component layout, with separation controlled by `sep`.
 
 ### `MIXTURE_PARAM_MODE=viroli_smoke`
 
-This mode matches the standalone Viroli smoke-test script.
+This mode preserves the compact DGP used in the earlier Viroli smoke checks.
 
 For `G_h = 2`:
 
@@ -213,9 +213,8 @@ cross-loading signs are generated from a block sign matrix.
 
 ### `LOADING_SIGN_MODE=smoke`
 
-Primary loadings are positive, matching
-`scripts/sample_size/test_viroli_probit_independent_gibbs.R`.  Cross-loadings
-remain randomly signed.
+Primary loadings are positive, matching the earlier compact smoke-check DGP.
+Cross-loadings remain randomly signed.
 
 ## Intercept Modes
 
@@ -225,7 +224,7 @@ All item intercepts are zero.
 
 ### `INTERCEPT_MODE=viroli_smoke`
 
-This matches the standalone Viroli smoke-test script:
+This matches the earlier compact Viroli smoke-check intercept DGP:
 
 ```text
 block_shift = seq(-0.65, 0.65, length.out = H)
@@ -246,7 +245,7 @@ when the estimated loading matrix is poorly oriented.
 ### `ALIGNMENT_MODE=loadings`
 
 Columns are matched by loading-vector distance, with sign correction.  This is
-the stricter setting used to reproduce the standalone Viroli smoke test.  It is
+the stricter setting used in the current final simulation.  It is
 the better diagnostic when the question is whether the whole parameterization is
 coherently recovered.
 
@@ -261,19 +260,26 @@ scripts/sample_size/run_final_product_viroli_simulation.R
 Default design:
 
 ```text
-n = 100, 200, 300, 400
-p = 500, 1000, 2000, 4000 for product MAP
-p = 500, 1000 and n = 100, 200 for the Viroli Gibbs baselines
+n = 100, 200
+p = 500, 1000, 1500, 2000 for product MAP
+p = 500, 1000 for the Viroli Gibbs baselines
 H = 5, 10, 15, 20
 G = 2 or 3 on every factor coordinate
-separation = 1, 2
+separation = 1
 replications = 25
-loading design = Cross
-block size mode = moderate_ifeval_like
+loading design = Cross/IFEval-like
+loading strength = weak Uniform(1.25, 1.75) or strong Uniform(2.50, 3.00)
+cross-loading probability = 0.075 or 0.20
+cross-loading signs = random
+block size mode = balanced or ifeval_like
 intercept mode = ifeval_like
 mixture parameter mode = viroli_smoke
 alignment mode = loadings
 ```
+
+In this final grid, "loading strength" applies to every nonzero loading:
+primary loadings and cross-loadings use the same magnitude range.  Primary
+loadings are positive; cross-loadings are randomly signed.
 
 Methods:
 
@@ -297,52 +303,5 @@ All methods use the same generated data for a scenario and replication.  Dense
 joint mixture parameter tables are skipped when `G^H` exceeds
 `MAX_JOINT_PARAMETER_K`; marginal mixture RMSEs are always recorded.
 
-## Smoke-Test Reproduction Command
-
-To reproduce the standalone Viroli smoke-test DGP inside the main driver, use:
-
-```sh
-OUT_DIR=results/diagnostics/main_driver_viroli_smoke_reproduction \
-H_VALUES=10 \
-G_VALUES=2,3 \
-NP_GRID=n100p500:100:500 \
-LOADING_DESIGNS=block_sparse \
-BLOCK_SIZE_MODE=balanced \
-REP_VALUES=1,2 \
-MIXTURE_PARAM_MODE=viroli_smoke \
-INTERCEPT_MODE=viroli_smoke \
-LOADING_SIGN_MODE=smoke \
-ALIGNMENT_MODE=loadings \
-RUN_OURS=TRUE \
-RUN_JOINT_MFA=FALSE \
-RUN_VIROLI=TRUE \
-OURS_PRETRAINING_METHOD=em_svd \
-EM_SVD_ITER=30 \
-ROTATION_ITER=30 \
-ROTATION_N_MIX_STARTS=1 \
-ROTATION_GRID_SIZE=11 \
-REFINE_ITER=30 \
-MIXTURE_UPDATE=map \
-LAMBDA_L1_PENALTY=10 \
-REFINE_MU_PRIOR_KAPPA=0.25 \
-REFINE_WEIGHT_PRIOR_ALPHA=5 \
-PARALLEL_OURS=TRUE \
-VIROLI_ITER=2000 \
-VIROLI_BURN=1000 \
-VIROLI_THIN=1 \
-VIROLI_LAMBDA_L1_PENALTY=10 \
-VIROLI_SEED=1 \
-VIROLI_NORMALIZE_EACH_DRAW=TRUE \
-VIROLI_COMPUTE_PARAMETER_ESS=FALSE \
-Rscript scripts/sample_size/compare_original_simulation_joint_mfa_gibbs.R
-```
-
-The original standalone smoke script is:
-
-```text
-scripts/sample_size/test_viroli_probit_independent_gibbs.R
-```
-
-It is useful as a compact diagnostic, but the main driver should be preferred
-for paper-facing simulation results because it records the settings in every
-output row.
+The main launcher should be used for paper-facing simulation results because it
+records every design setting in each output row and writes resumable chunk files.

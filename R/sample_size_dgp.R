@@ -129,7 +129,11 @@ make_sample_size_loadings <- function(
     H,
     block_size_mode = "balanced",
     loading_sign_mode = c("block", "smoke"),
-    block_sizes = NULL) {
+    block_sizes = NULL,
+    primary_loading_range = NULL,
+    cross_loading_range = NULL,
+    cross_loading_prob = NULL,
+    cross_sign_mode = NULL) {
   design <- normalize_sample_size_loading_design(design)
   loading_sign_mode <- match.arg(loading_sign_mode)
   if (is.null(block_sizes)) block_sizes <- make_sample_size_block_sizes(p, H, block_size_mode)
@@ -138,16 +142,48 @@ make_sample_size_loadings <- function(
   block_id <- sample_size_block_id(block_sizes)
   signs <- sample_size_block_sign_matrix(H)
   Lambda <- matrix(0, p, H)
+  default <- switch(
+    design,
+    block_sparse = list(primary = c(0.75, 1.25), cross = c(0.12, 0.28), prob = 0.035, sign = "block"),
+    block_sparse_multisigned = list(primary = c(0.75, 1.25), cross = c(0.55, 0.95), prob = NA_real_, sign = "block"),
+    balanced_moderate_few_positive_cross = list(primary = c(0.75, 1.25), cross = c(0.12, 0.28), prob = 0.035, sign = "positive"),
+    balanced_moderate_dense_signed_cross = list(primary = c(0.75, 1.25), cross = c(0.20, 0.60), prob = 0.25, sign = "random")
+  )
+  primary_loading_range <- if (is.null(primary_loading_range)) default$primary else sort(as.numeric(primary_loading_range))
+  cross_loading_range <- if (is.null(cross_loading_range)) default$cross else sort(as.numeric(cross_loading_range))
+  cross_loading_prob <- if (is.null(cross_loading_prob)) default$prob else as.numeric(cross_loading_prob)
+  cross_sign_mode <- if (is.null(cross_sign_mode)) default$sign else as.character(cross_sign_mode)
+  if (length(primary_loading_range) != 2L || any(!is.finite(primary_loading_range)) ||
+      any(primary_loading_range < 0)) {
+    stop("primary_loading_range must contain two non-negative finite values.", call. = FALSE)
+  }
+  if (length(cross_loading_range) != 2L || any(!is.finite(cross_loading_range)) ||
+      any(cross_loading_range < 0)) {
+    stop("cross_loading_range must contain two non-negative finite values.", call. = FALSE)
+  }
+  if (is.finite(cross_loading_prob) &&
+      (!is.finite(cross_loading_prob) || cross_loading_prob < 0 || cross_loading_prob > 1)) {
+    stop("cross_loading_prob must be in [0, 1].", call. = FALSE)
+  }
+  if (!cross_sign_mode %in% c("positive", "negative", "random", "block")) {
+    stop("cross_sign_mode must be one of positive, negative, random, or block.", call. = FALSE)
+  }
+
+  draw_cross_sign <- function(h, k) {
+    if (cross_sign_mode == "positive") return(1)
+    if (cross_sign_mode == "negative") return(-1)
+    if (cross_sign_mode == "random") return(sample(c(-1, 1), 1L))
+    if (loading_sign_mode == "smoke") sample(c(-1, 1), 1L) else signs[h, k]
+  }
 
   if (design == "block_sparse") {
     for (j in seq_len(p)) {
       h <- block_id[j]
       primary_sign <- if (loading_sign_mode == "smoke") 1 else signs[h, h]
-      Lambda[j, h] <- primary_sign * runif(1, 0.75, 1.25)
+      Lambda[j, h] <- primary_sign * runif(1, primary_loading_range[1L], primary_loading_range[2L])
       for (k in setdiff(seq_len(H), h)) {
-        if (runif(1) < 0.035) {
-          cross_sign <- if (loading_sign_mode == "smoke") sample(c(-1, 1), 1L) else signs[h, k]
-          Lambda[j, k] <- cross_sign * runif(1, 0.12, 0.28)
+        if (runif(1) < cross_loading_prob) {
+          Lambda[j, k] <- draw_cross_sign(h, k) * runif(1, cross_loading_range[1L], cross_loading_range[2L])
         }
       }
     }
@@ -158,27 +194,30 @@ make_sample_size_loadings <- function(
       cross_factors <- neighboring_factors_global(h, H, n_cross)
       for (j in block_rows) {
         primary_sign <- if (loading_sign_mode == "smoke") 1 else signs[h, h]
-        Lambda[j, h] <- primary_sign * runif(1, 0.75, 1.25)
+        Lambda[j, h] <- primary_sign * runif(1, primary_loading_range[1L], primary_loading_range[2L])
         for (k in cross_factors) {
-          cross_sign <- if (loading_sign_mode == "smoke") sample(c(-1, 1), 1L) else signs[h, k]
-          Lambda[j, k] <- cross_sign * runif(1, 0.55, 0.95)
+          Lambda[j, k] <- draw_cross_sign(h, k) * runif(1, cross_loading_range[1L], cross_loading_range[2L])
         }
       }
     }
   } else if (design == "balanced_moderate_few_positive_cross") {
     for (j in seq_len(p)) {
       h <- block_id[j]
-      Lambda[j, h] <- runif(1, 0.75, 1.25)
+      Lambda[j, h] <- runif(1, primary_loading_range[1L], primary_loading_range[2L])
       for (k in setdiff(seq_len(H), h)) {
-        if (runif(1) < 0.035) Lambda[j, k] <- runif(1, 0.12, 0.28)
+        if (runif(1) < cross_loading_prob) {
+          Lambda[j, k] <- draw_cross_sign(h, k) * runif(1, cross_loading_range[1L], cross_loading_range[2L])
+        }
       }
     }
   } else if (design == "balanced_moderate_dense_signed_cross") {
     for (j in seq_len(p)) {
       h <- block_id[j]
-      Lambda[j, h] <- runif(1, 0.75, 1.25)
+      Lambda[j, h] <- runif(1, primary_loading_range[1L], primary_loading_range[2L])
       for (k in setdiff(seq_len(H), h)) {
-        if (runif(1) < 0.25) Lambda[j, k] <- sample(c(-1, 1), 1L) * runif(1, 0.20, 0.60)
+        if (runif(1) < cross_loading_prob) {
+          Lambda[j, k] <- draw_cross_sign(h, k) * runif(1, cross_loading_range[1L], cross_loading_range[2L])
+        }
       }
     }
   } else {

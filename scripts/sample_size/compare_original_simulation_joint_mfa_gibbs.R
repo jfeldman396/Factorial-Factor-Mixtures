@@ -26,6 +26,10 @@ repo_root <- normalizePath(file.path(script_dir, "../.."))
 source(file.path(repo_root, "R", "binary_probit_pretraining.R"))
 source(file.path(repo_root, "R", "binary_probit_refinement.R"))
 source(file.path(repo_root, "R", "probit_ifa_em_svd_pretraining.R"))
+source(file.path(repo_root, "R", "probit_signal_metrics.R"))
+source(file.path(repo_root, "R", "fit_probit_signal_em_svd_soft.R"))
+source(file.path(repo_root, "R", "probit_ifa_em_svd_soft_pretraining.R"))
+source(file.path(repo_root, "R", "riemannian_rotation.R"))
 source(file.path(repo_root, "R", "viroli_probit_independent_gibbs.R"))
 source(file.path(repo_root, "R", "sample_size_dgp.R"))
 
@@ -42,6 +46,15 @@ split_csv <- function(x) {
 
 parse_int_csv <- function(x) as.integer(split_csv(x))
 parse_num_csv <- function(x) as.numeric(split_csv(x))
+parse_optional_num_csv <- function(name) {
+  value <- Sys.getenv(name, unset = "")
+  if (!nzchar(value)) return(NULL)
+  out <- parse_num_csv(value)
+  if (length(out) == 0L || any(!is.finite(out))) {
+    stop(name, " must contain finite numeric values.", call. = FALSE)
+  }
+  out
+}
 parse_g_count_string <- function(x) parse_int_csv(gsub("-", ",", x, fixed = TRUE))
 
 parse_g_configs <- function(x) {
@@ -93,6 +106,26 @@ intercept_clip <- get_env("INTERCEPT_CLIP", 1.75, as.numeric)
 loading_sign_mode <- get_env("LOADING_SIGN_MODE", "block", as.character)
 if (!loading_sign_mode %in% c("block", "smoke")) {
   stop("LOADING_SIGN_MODE must be either 'block' or 'smoke'.")
+}
+loading_strength <- get_env("LOADING_STRENGTH", "default", as.character)
+if (!loading_strength %in% c("default", "weak", "strong")) {
+  stop("LOADING_STRENGTH must be one of 'default', 'weak', or 'strong'.")
+}
+loading_strength_defaults <- switch(
+  loading_strength,
+  weak = list(primary = c(1.25, 1.75), cross = c(1.25, 1.75)),
+  strong = list(primary = c(2.50, 3.00), cross = c(2.50, 3.00)),
+  default = list(primary = NULL, cross = NULL)
+)
+primary_loading_range <- parse_optional_num_csv("PRIMARY_LOADING_RANGE")
+if (is.null(primary_loading_range)) primary_loading_range <- loading_strength_defaults$primary
+cross_loading_range <- parse_optional_num_csv("CROSS_LOADING_RANGE")
+if (is.null(cross_loading_range)) cross_loading_range <- loading_strength_defaults$cross
+cross_loading_prob <- get_env("CROSS_LOADING_PROB", NA_real_, as.numeric)
+if (!is.finite(cross_loading_prob) || is.na(cross_loading_prob)) cross_loading_prob <- NULL
+cross_sign_mode <- get_env("CROSS_SIGN_MODE", "random", as.character)
+if (!cross_sign_mode %in% c("positive", "negative", "random", "block")) {
+  stop("CROSS_SIGN_MODE must be one of positive, negative, random, or block.")
 }
 alignment_mode <- get_env("ALIGNMENT_MODE", "factors", as.character)
 if (!alignment_mode %in% c("factors", "loadings")) {
@@ -168,8 +201,8 @@ pretrain_aug_iter <- get_env("PRETRAIN_AUG_ITER", 4L, as.integer)
 # vectors toward independent marginal mixtures.  sampled_z is retained only as
 # a legacy ablation.
 ours_pretraining_method <- get_env("OURS_PRETRAINING_METHOD", "em_svd", as.character)
-if (!ours_pretraining_method %in% c("sampled_z", "em_svd")) {
-  stop("OURS_PRETRAINING_METHOD must be either 'sampled_z' or 'em_svd'.")
+if (!ours_pretraining_method %in% c("sampled_z", "em_svd", "em_svd_soft")) {
+  stop("OURS_PRETRAINING_METHOD must be 'sampled_z', 'em_svd', or 'em_svd_soft'.")
 }
 pretrain_z_update <- get_env("PRETRAIN_Z_UPDATE", "sample", as.character)
 if (!pretrain_z_update %in% c("sample", "expectation")) {
@@ -224,11 +257,31 @@ if (!em_svd_init_z %in% c("sample", "expectation")) {
 }
 em_svd_random_starts <- get_env("EM_SVD_RANDOM_STARTS", 0L, as.integer)
 em_svd_random_start_scale <- get_env("EM_SVD_RANDOM_START_SCALE", 0.05, as.numeric)
+em_svd_soft_shrinkage <- get_env("EM_SVD_SOFT_SHRINKAGE", NA_real_, as.numeric)
+if (!is.finite(em_svd_soft_shrinkage) || is.na(em_svd_soft_shrinkage)) {
+  em_svd_soft_shrinkage <- NULL
+}
+em_svd_soft_ratio <- get_env("EM_SVD_SOFT_RATIO", 0.5, as.numeric)
+em_svd_soft_reference <- get_env("EM_SVD_SOFT_REFERENCE", "dHplus1", as.character)
+em_svd_soft_rank_cap_env <- get_env("EM_SVD_SOFT_RANK_CAP", "Hplus5", as.character)
 rotation_random_starts <- get_env("ROTATION_RANDOM_STARTS", 1L, as.integer)
 rotation_max_outer <- get_env("ROTATION_ITER", pretrain_aug_iter, as.integer)
 rotation_n_mix_starts <- get_env("ROTATION_N_MIX_STARTS", 3L, as.integer)
 rotation_grid_size <- get_env("ROTATION_GRID_SIZE", 21L, as.integer)
+rotation_optimizer <- get_env("ROTATION_OPTIMIZER", "riemannian", as.character)
+if (!rotation_optimizer %in% c("riemannian", "givens")) {
+  stop("ROTATION_OPTIMIZER must be either 'riemannian' or 'givens'.")
+}
 rotation_sweep <- get_env("ROTATION_SWEEP", "full", as.character)
+riemannian_rotation_steps <- get_env("RIEMANNIAN_ROTATION_STEPS", 10L, as.integer)
+riemannian_eta0 <- get_env("RIEMANNIAN_ETA0", 1, as.numeric)
+riemannian_beta <- get_env("RIEMANNIAN_BETA", 0.5, as.numeric)
+riemannian_min_eta <- get_env("RIEMANNIAN_MIN_ETA", 1e-8, as.numeric)
+riemannian_grad_tol <- get_env("RIEMANNIAN_GRAD_TOL", 1e-6, as.numeric)
+riemannian_update <- get_env("RIEMANNIAN_UPDATE", "cayley", as.character)
+if (!riemannian_update %in% c("cayley", "expm")) {
+  stop("RIEMANNIAN_UPDATE must be either 'cayley' or 'expm'.")
+}
 rotation_loading_l1_penalty <- get_env("ROTATION_LOADING_L1_PENALTY", 0, as.numeric)
 rotation_objective_tolerance <- get_env("ROTATION_OBJECTIVE_TOLERANCE", 1e-4, as.numeric)
 rotation_min_outer <- get_env("ROTATION_MIN_OUTER", 2L, as.integer)
@@ -277,6 +330,19 @@ max_joint_parameter_K <- get_env("MAX_JOINT_PARAMETER_K", 5000L, as.integer)
 max_joint_profile_ari_K <- get_env("MAX_JOINT_PROFILE_ARI_K", 5000L, as.integer)
 success_factor_corr <- get_env("SUCCESS_FACTOR_CORR", 0.90, as.numeric)
 success_parameter_corr <- get_env("SUCCESS_PARAMETER_CORR", 0.90, as.numeric)
+
+resolve_rank_cap <- function(spec, H, n, p) {
+  spec <- trimws(tolower(as.character(spec)))
+  if (!nzchar(spec) || spec %in% c("none", "null", "na", "inf", "full")) return(NULL)
+  if (spec %in% c("h", "rankh")) return(min(as.integer(H), n, p))
+  if (spec %in% c("hplus5", "h+5")) return(min(as.integer(H) + 5L, n, p))
+  if (spec %in% c("2h", "twiceh")) return(min(2L * as.integer(H), n, p))
+  out <- suppressWarnings(as.integer(spec))
+  if (!is.finite(out) || is.na(out) || out < 1L) {
+    stop("rank cap must be one of none, H, Hplus5, 2H, or a positive integer.")
+  }
+  min(out, n, p)
+}
 
 make_equal_mixture_params <- function(H, G, sep, variance_mode = mixture_variance_mode) {
   variance_mode <- match.arg(variance_mode, c("unequal", "equal"))
@@ -375,7 +441,11 @@ make_dgp_loadings <- function(design_name, p, H) {
     p = p,
     H = H,
     block_size_mode = block_size_mode,
-    loading_sign_mode = loading_sign_mode
+    loading_sign_mode = loading_sign_mode,
+    primary_loading_range = primary_loading_range,
+    cross_loading_range = cross_loading_range,
+    cross_loading_prob = cross_loading_prob,
+    cross_sign_mode = cross_sign_mode
   )
 }
 
@@ -745,6 +815,122 @@ dgp_diagnostics <- function(sim, G) {
     dgp_n_empty_marginal_components = sum(component_counts == 0L),
     dgp_observed_joint_profiles = nrow(unique_profiles),
     dgp_possible_joint_profiles = prod(as.numeric(G)),
+    stringsAsFactors = FALSE
+  )
+}
+
+loading_design_settings_summary <- function() {
+  primary_range <- if (is.null(primary_loading_range)) c(NA_real_, NA_real_) else primary_loading_range
+  cross_range <- if (is.null(cross_loading_range)) c(NA_real_, NA_real_) else cross_loading_range
+  data.frame(
+    loading_strength = loading_strength,
+    primary_loading_min = primary_range[1L],
+    primary_loading_max = primary_range[2L],
+    cross_loading_min = cross_range[1L],
+    cross_loading_max = cross_range[2L],
+    cross_loading_prob = if (is.null(cross_loading_prob)) NA_real_ else cross_loading_prob,
+    cross_sign_mode = cross_sign_mode,
+    stringsAsFactors = FALSE
+  )
+}
+
+loading_support_diagnostics <- function(sim) {
+  Lambda <- as.matrix(sim$Lambda)
+  p <- nrow(Lambda)
+  H <- ncol(Lambda)
+  primary <- matrix(FALSE, p, H)
+  primary[cbind(seq_len(p), sim$block_id)] <- TRUE
+  nonzero <- abs(Lambda) > 1e-12
+  cross <- nonzero & !primary
+  primary_values <- abs(Lambda[primary])
+  cross_values <- abs(Lambda[cross])
+  total_nonzero_by_factor <- colSums(nonzero)
+  cross_nonzero_by_factor <- colSums(cross)
+  l2_by_factor <- sqrt(colSums(Lambda^2))
+  primary_l2_by_factor <- vapply(seq_len(H), function(h) {
+    rows <- sim$block_id == h
+    sqrt(sum(Lambda[rows, h]^2))
+  }, numeric(1L))
+  data.frame(
+    dgp_min_block_size = min(sim$block_sizes),
+    dgp_median_block_size = median(sim$block_sizes),
+    dgp_max_block_size = max(sim$block_sizes),
+    dgp_min_total_nonzero_loadings_by_factor = min(total_nonzero_by_factor),
+    dgp_median_total_nonzero_loadings_by_factor = median(total_nonzero_by_factor),
+    dgp_min_cross_nonzero_loadings_by_factor = min(cross_nonzero_by_factor),
+    dgp_median_cross_nonzero_loadings_by_factor = median(cross_nonzero_by_factor),
+    dgp_mean_nonzero_loadings_per_item = mean(rowSums(nonzero)),
+    dgp_mean_cross_loadings_per_item = mean(rowSums(cross)),
+    dgp_cross_nonzero_fraction = sum(cross) / max(p * max(H - 1L, 1L), 1L),
+    dgp_mean_abs_primary_loading = mean(primary_values),
+    dgp_mean_abs_cross_loading = if (length(cross_values)) mean(cross_values) else 0,
+    dgp_min_loading_l2_by_factor = min(l2_by_factor),
+    dgp_median_loading_l2_by_factor = median(l2_by_factor),
+    dgp_min_primary_l2_by_factor = min(primary_l2_by_factor),
+    dgp_median_primary_l2_by_factor = median(primary_l2_by_factor),
+    stringsAsFactors = FALSE
+  )
+}
+
+stage1_signal_summary <- function(sim, fit, H) {
+  pre <- fit$pretrain_fit
+  L_hat <- if (!is.null(pre$L_hat)) pre$L_hat else NULL
+  alpha_hat <- if (!is.null(pre$alpha_hat)) pre$alpha_hat else NULL
+  if (is.null(L_hat) || is.null(alpha_hat)) return(empty_stage1_signal_summary())
+
+  eta_true <- sweep(sim$F %*% t(sim$Lambda), 2L, sim$alpha, "+")
+  truth <- make_centered_signal_truth(eta_true)
+  eta_hat <- sweep(as.matrix(L_hat), 2L, as.numeric(alpha_hat), "+")
+  metric <- probit_signal_metrics(
+    fit = list(
+      method = "stage1_pretraining",
+      eta_hat = eta_hat,
+      L_hat = as.matrix(L_hat),
+      converged = isTRUE(pre$pretraining_converged),
+      iterations = if (!is.null(pre$pretraining_completed_iter)) pre$pretraining_completed_iter else NA_integer_
+    ),
+    truth = truth,
+    X = sim$X_binary,
+    H = H
+  )
+
+  singular_at <- function(x, k) {
+    if (!length(x) || k > length(x)) NA_real_ else x[k]
+  }
+  true_sv <- svd(truth$L0_c, nu = 0, nv = 0)$d
+  fit_sv <- svd(as.matrix(L_hat), nu = 0, nv = 0)$d
+  out <- data.frame(
+    stage1_signal_relative_frobenius_error = metric$relative_frobenius_error,
+    stage1_signal_per_entry_mse = metric$per_entry_mse,
+    stage1_signal_correlation = metric$signal_correlation,
+    stage1_sinTheta_op = metric$sinTheta_op,
+    stage1_sinTheta_fro = metric$sinTheta_fro,
+    stage1_estimated_rank = metric$estimated_rank,
+    stage1_full_loglik_per_response = metric$full_loglik / length(sim$X_binary),
+    stage1_true_sv_H = singular_at(true_sv, H),
+    stage1_true_sv_Hplus1 = singular_at(true_sv, H + 1L),
+    stage1_fit_sv_H = singular_at(fit_sv, H),
+    stage1_fit_sv_Hplus1 = singular_at(fit_sv, H + 1L),
+    stage1_fit_sv_H_to_Hplus1_ratio = singular_at(fit_sv, H) / max(singular_at(fit_sv, H + 1L), .Machine$double.eps),
+    stringsAsFactors = FALSE
+  )
+  out
+}
+
+empty_stage1_signal_summary <- function() {
+  data.frame(
+    stage1_signal_relative_frobenius_error = NA_real_,
+    stage1_signal_per_entry_mse = NA_real_,
+    stage1_signal_correlation = NA_real_,
+    stage1_sinTheta_op = NA_real_,
+    stage1_sinTheta_fro = NA_real_,
+    stage1_estimated_rank = NA_integer_,
+    stage1_full_loglik_per_response = NA_real_,
+    stage1_true_sv_H = NA_real_,
+    stage1_true_sv_Hplus1 = NA_real_,
+    stage1_fit_sv_H = NA_real_,
+    stage1_fit_sv_Hplus1 = NA_real_,
+    stage1_fit_sv_H_to_Hplus1_ratio = NA_real_,
     stringsAsFactors = FALSE
   )
 }
@@ -1620,7 +1806,11 @@ write_ours_timing_history <- function(fit, out_file) {
   pieces <- list()
   if (!is.null(fit$pretrain_fit$em_history)) {
     d <- fit$pretrain_fit$em_history
-    d$stage <- "lowrank_em_svd"
+    d$stage <- if (identical(fit$pretrain_fit$model, "probit_ifa_em_svd_soft_spectral_mixture_pretraining")) {
+      "lowrank_em_svd_soft"
+    } else {
+      "lowrank_em_svd"
+    }
     pieces[[length(pieces) + 1L]] <- d
   } else if (!is.null(fit$pretrain_fit$history)) {
     d <- fit$pretrain_fit$history
@@ -1703,7 +1893,75 @@ fit_ours <- function(X, H, G, seed) {
       refine_weight_prior_alpha = refine_weight_prior_alpha,
       min_mixture_var = min_mixture_var,
       grid_size = rotation_grid_size,
+      rotation_optimizer = rotation_optimizer,
       rotation_sweep = rotation_sweep,
+      riemannian_rotation_steps = riemannian_rotation_steps,
+      riemannian_eta0 = riemannian_eta0,
+      riemannian_beta = riemannian_beta,
+      riemannian_min_eta = riemannian_min_eta,
+      riemannian_grad_tol = riemannian_grad_tol,
+      riemannian_update = riemannian_update,
+      rotation_objective_tolerance = rotation_objective_tolerance,
+      rotation_min_outer = rotation_min_outer,
+      require_mixture_convergence_for_rotation_stop = rotation_require_mixture_convergence,
+      loading_penalty = pretrain_loading_penalty,
+      n_refine_iter = refine_iter,
+      factor_update = factor_update,
+      lambda_l1_penalty = lambda_l1_penalty,
+      lasso_backend = lasso_backend,
+      glmnet_standardize = glmnet_standardize,
+      objective_tolerance = refine_objective_tolerance,
+      min_refine_iter = refine_min_iter,
+      return_best_refinement_iteration = refine_return_best_iteration,
+      refinement_selection_objective = refine_selection_objective,
+      require_mixture_convergence_for_stop = refine_require_mixture_convergence,
+      mixture_refit = mixture_refit,
+      enforce_monotone_refinement = refine_enforce_monotone,
+      monotone_tolerance = refine_monotone_tolerance,
+      parallel = parallel_ours,
+      workers = parallel_workers,
+      seed = seed,
+      verbose = FALSE
+    )
+  } else if (identical(ours_pretraining_method, "em_svd_soft")) {
+    soft_rank_cap <- resolve_rank_cap(em_svd_soft_rank_cap_env, H = H, n = nrow(X), p = ncol(X))
+    fit <- fit_binary_probit_em_svd_soft_pretrain_then_refine(
+      X = X,
+      H = H,
+      G_fixed = G,
+      em_max_iter = em_svd_iter,
+      em_tol_loglik = em_svd_tol_loglik,
+      em_tol_L = em_svd_tol_L,
+      soft_shrinkage = em_svd_soft_shrinkage,
+      soft_shrinkage_ratio = em_svd_soft_ratio,
+      soft_shrinkage_reference = em_svd_soft_reference,
+      soft_rank_cap = soft_rank_cap,
+      rotation_random_starts = rotation_random_starts,
+      rotation_loading_l1_penalty = rotation_loading_l1_penalty,
+      rotation_max_outer = rotation_max_outer,
+      n_mix_starts = rotation_n_mix_starts,
+      mixture_max_iter = mixture_max_iter,
+      mixture_update = mixture_update,
+      mu_prior_mean = mu_prior_mean,
+      mu_prior_kappa = mu_prior_kappa,
+      var_prior_shape = var_prior_shape,
+      var_prior_scale = var_prior_scale,
+      weight_prior_alpha = weight_prior_alpha,
+      refine_mu_prior_mean = refine_mu_prior_mean,
+      refine_mu_prior_kappa = refine_mu_prior_kappa,
+      refine_var_prior_shape = refine_var_prior_shape,
+      refine_var_prior_scale = refine_var_prior_scale,
+      refine_weight_prior_alpha = refine_weight_prior_alpha,
+      min_mixture_var = min_mixture_var,
+      grid_size = rotation_grid_size,
+      rotation_optimizer = rotation_optimizer,
+      rotation_sweep = rotation_sweep,
+      riemannian_rotation_steps = riemannian_rotation_steps,
+      riemannian_eta0 = riemannian_eta0,
+      riemannian_beta = riemannian_beta,
+      riemannian_min_eta = riemannian_min_eta,
+      riemannian_grad_tol = riemannian_grad_tol,
+      riemannian_update = riemannian_update,
       rotation_objective_tolerance = rotation_objective_tolerance,
       rotation_min_outer = rotation_min_outer,
       require_mixture_convergence_for_rotation_stop = rotation_require_mixture_convergence,
@@ -1829,6 +2087,18 @@ if (nrow(existing_results) && all(c("scenario", "method") %in% names(existing_re
   cat(sprintf("Resuming from %d existing result rows in %s\n", nrow(existing_results), out_dir))
 }
 
+scenario_token <- function(x) {
+  x <- as.character(x)
+  x <- gsub("[^A-Za-z0-9]+", "_", x)
+  x <- gsub("^_+|_+$", "", x)
+  ifelse(nzchar(x), x, "default")
+}
+
+number_token <- function(x) {
+  if (is.null(x) || length(x) == 0L || !is.finite(x[1L])) return("default")
+  scenario_token(format(x[1L], scientific = FALSE, trim = TRUE))
+}
+
 all_results <- vector("list", nrow(existing_results) + nrow(design_grid) * 3L)
 result_idx <- 0L
 if (nrow(existing_results)) {
@@ -1853,8 +2123,17 @@ for (row_idx in seq_len(nrow(design_grid))) {
   seed <- seed_base + 100000L * H_scenario + 50000L * sum(G_scenario * seq_along(G_scenario)) +
     10000L * row$rep + 1000L * row_idx
   scenario <- sprintf(
-    "rep%d_%s_n%d_p%d_H%d_G%s_sep%s",
-    row$rep, row$loading_design, np_row$n, np_row$p, H_scenario, G_label, row$separation
+    "rep%d_%s_%s_cp%s_%s_n%d_p%d_H%d_G%s_sep%s",
+    row$rep,
+    row$loading_design,
+    scenario_token(loading_strength),
+    number_token(cross_loading_prob),
+    scenario_token(block_size_mode),
+    np_row$n,
+    np_row$p,
+    H_scenario,
+    G_label,
+    row$separation
   )
   cat("\nScenario:", scenario, "\n")
 
@@ -1880,6 +2159,8 @@ for (row_idx in seq_len(nrow(design_grid))) {
     seed = seed
   )
   dgp_summary <- dgp_diagnostics(sim, G_scenario)
+  dgp_loading_settings <- loading_design_settings_summary()
+  dgp_loading_summary <- loading_support_diagnostics(sim)
   if (is.finite(K_joint) && K_joint <= max_joint_parameter_K) {
     true_joint_params <- true_joint_mixture_parameters(sim$mixture_params)
   } else {
@@ -1980,18 +2261,55 @@ for (row_idx in seq_len(nrow(design_grid))) {
       block_size_mode = block_size_mode,
       loading_sign_mode = loading_sign_mode,
       alignment_mode = alignment_mode,
+      dgp_loading_settings,
+      dgp_loading_summary,
       dgp_summary,
       ours_pretraining_method = ours_pretraining_method,
-      em_svd_init_method = if (identical(ours_pretraining_method, "em_svd")) em_svd_init_method else NA_character_,
-      em_svd_init_z = if (identical(ours_pretraining_method, "em_svd")) em_svd_init_z else NA_character_,
-      selected_em_start = if (identical(ours_pretraining_method, "em_svd") && !is.null(ours$pretrain_fit$selected_em_start)) {
+      em_svd_init_method = if (identical(ours_pretraining_method, "em_svd")) {
+        em_svd_init_method
+      } else if (identical(ours_pretraining_method, "em_svd_soft")) {
+        "soft_threshold_svd"
+      } else {
+        NA_character_
+      },
+      em_svd_init_z = if (identical(ours_pretraining_method, "em_svd")) {
+        em_svd_init_z
+      } else if (identical(ours_pretraining_method, "em_svd_soft")) {
+        "none"
+      } else {
+        NA_character_
+      },
+      selected_em_start = if (ours_pretraining_method %in% c("em_svd", "em_svd_soft") && !is.null(ours$pretrain_fit$selected_em_start)) {
         ours$pretrain_fit$selected_em_start
       } else {
         NA_character_
       },
+      em_svd_soft_shrinkage = if (identical(ours_pretraining_method, "em_svd_soft") && !is.null(ours$pretrain_fit$soft_shrinkage)) {
+        ours$pretrain_fit$soft_shrinkage
+      } else {
+        NA_real_
+      },
+      em_svd_soft_shrinkage_ratio = if (identical(ours_pretraining_method, "em_svd_soft") && !is.null(ours$pretrain_fit$soft_shrinkage_ratio)) {
+        ours$pretrain_fit$soft_shrinkage_ratio
+      } else {
+        NA_real_
+      },
+      em_svd_soft_shrinkage_reference = if (identical(ours_pretraining_method, "em_svd_soft") && !is.null(ours$pretrain_fit$soft_shrinkage_reference)) {
+        ours$pretrain_fit$soft_shrinkage_reference
+      } else {
+        NA_character_
+      },
+      em_svd_soft_rank_cap = if (identical(ours_pretraining_method, "em_svd_soft") && !is.null(ours$pretrain_fit$soft_rank_cap)) {
+        ours$pretrain_fit$soft_rank_cap
+      } else {
+        NA_integer_
+      },
       mixture_update = mixture_update,
       pretrain_loading_penalty = pretrain_loading_penalty,
+      rotation_optimizer = if (ours_pretraining_method %in% c("em_svd", "em_svd_soft")) rotation_optimizer else NA_character_,
       rotation_loading_l1_penalty = rotation_loading_l1_penalty,
+      riemannian_rotation_steps = if (ours_pretraining_method %in% c("em_svd", "em_svd_soft") && identical(rotation_optimizer, "riemannian")) riemannian_rotation_steps else NA_integer_,
+      riemannian_update = if (ours_pretraining_method %in% c("em_svd", "em_svd_soft") && identical(rotation_optimizer, "riemannian")) riemannian_update else NA_character_,
       lambda_l1_penalty = lambda_l1_penalty,
       lasso_backend = lasso_backend,
       glmnet_standardize = glmnet_standardize,
@@ -2012,6 +2330,7 @@ for (row_idx in seq_len(nrow(design_grid))) {
       parallel_workers = if (is.null(parallel_workers)) NA_integer_ else parallel_workers,
       ours_eval,
       ours_convergence_summary(ours),
+      stage1_signal_summary(sim, ours, H_scenario),
       ours_marginal_recovery$summary,
       ours_param_recovery$summary,
       ours_all_param_recovery,
@@ -2101,11 +2420,14 @@ for (row_idx in seq_len(nrow(design_grid))) {
       block_size_mode = block_size_mode,
       loading_sign_mode = loading_sign_mode,
       alignment_mode = alignment_mode,
+      dgp_loading_settings,
+      dgp_loading_summary,
       dgp_summary,
       ours_pretraining_method = NA_character_,
       parallel_enabled = parallel_gibbs,
       parallel_workers = if (is.null(parallel_workers)) NA_integer_ else parallel_workers,
       mfa_eval,
+      empty_stage1_signal_summary(),
       mfa_param_recovery$summary,
       mfa_all_param_recovery,
       mfa$ess_summary,
@@ -2242,6 +2564,8 @@ for (row_idx in seq_len(nrow(design_grid))) {
       block_size_mode = block_size_mode,
       loading_sign_mode = loading_sign_mode,
       alignment_mode = alignment_mode,
+      dgp_loading_settings,
+      dgp_loading_summary,
       dgp_summary,
       ours_pretraining_method = NA_character_,
       viroli_lambda_l1_penalty = viroli_lambda_l1_penalty,
@@ -2251,6 +2575,7 @@ for (row_idx in seq_len(nrow(design_grid))) {
       parallel_enabled = parallel_gibbs,
       parallel_workers = if (is.null(parallel_workers)) NA_integer_ else parallel_workers,
       viroli_eval,
+      empty_stage1_signal_summary(),
       viroli_marginal_recovery$summary,
       viroli_param_recovery$summary,
       viroli_all_param_recovery,
@@ -2294,7 +2619,9 @@ summarize_results <- function(results) {
   group_cols <- c(
     "method", "np_regime", "n", "p", "H_true", "G_true", "K_joint",
     "separation", "mixture_param_mode", "mixture_variance_mode", "loading_design",
-    "block_size_mode", "loading_sign_mode", "alignment_mode",
+    "block_size_mode", "loading_sign_mode", "loading_strength",
+    "primary_loading_min", "primary_loading_max", "cross_loading_min",
+    "cross_loading_max", "cross_loading_prob", "cross_sign_mode", "alignment_mode",
     "pretrain_loading_penalty", "rotation_loading_l1_penalty", "lambda_l1_penalty",
     "viroli_lambda_l1_penalty", "viroli_loading_prior", "min_mixture_var"
   )
@@ -2309,7 +2636,23 @@ summarize_results <- function(results) {
     "joint_weight_l1",
     "flat_parameter_corr", "all_parameter_corr", "all_parameter_corr_raw",
     "joint_weight_max_abs_error", "est_effective_classes_001",
-    "est_effective_classes_01", "seconds"
+    "est_effective_classes_01",
+    "dgp_min_block_size", "dgp_median_block_size", "dgp_max_block_size",
+    "dgp_min_total_nonzero_loadings_by_factor",
+    "dgp_median_total_nonzero_loadings_by_factor",
+    "dgp_min_cross_nonzero_loadings_by_factor",
+    "dgp_median_cross_nonzero_loadings_by_factor",
+    "dgp_mean_nonzero_loadings_per_item", "dgp_mean_cross_loadings_per_item",
+    "dgp_cross_nonzero_fraction", "dgp_mean_abs_primary_loading",
+    "dgp_mean_abs_cross_loading", "dgp_min_loading_l2_by_factor",
+    "dgp_median_loading_l2_by_factor", "dgp_min_primary_l2_by_factor",
+    "dgp_median_primary_l2_by_factor",
+    "stage1_signal_relative_frobenius_error", "stage1_signal_per_entry_mse",
+    "stage1_signal_correlation", "stage1_sinTheta_op", "stage1_sinTheta_fro",
+    "stage1_estimated_rank", "stage1_full_loglik_per_response",
+    "stage1_true_sv_H", "stage1_true_sv_Hplus1", "stage1_fit_sv_H",
+    "stage1_fit_sv_Hplus1", "stage1_fit_sv_H_to_Hplus1_ratio",
+    "seconds"
   )
   character_cols <- intersect(c("flat_parameter_blocks", "all_parameter_blocks"), names(results))
   group_cols <- intersect(group_cols, names(results))
@@ -2353,7 +2696,9 @@ make_sample_size_threshold_summary <- function(summary) {
   if (!nrow(summary)) return(data.frame())
   group_cols <- c(
     "method", "H_true", "G_true", "K_joint", "mixture_param_mode",
-    "mixture_variance_mode", "loading_design", "loading_sign_mode", "alignment_mode"
+    "mixture_variance_mode", "loading_design", "block_size_mode",
+    "loading_sign_mode", "loading_strength", "cross_loading_prob",
+    "cross_sign_mode", "alignment_mode"
   )
   group_key <- safe_group_key(summary, group_cols)
   out <- lapply(split(summary, group_key), function(d) {

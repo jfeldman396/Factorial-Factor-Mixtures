@@ -4,8 +4,6 @@
 \usepackage{amsmath,amssymb,bm}
 \usepackage{booktabs}
 \usepackage{array}
-\usepackage{enumitem}
-\usepackage{xcolor}
 \usepackage{hyperref}
 \usepackage{microtype}
 
@@ -16,253 +14,169 @@
   citecolor=blue!45!black
 }
 
-\setlist[itemize]{leftmargin=1.4em,itemsep=0.25em,topsep=0.35em}
-\setlist[enumerate]{leftmargin=1.6em,itemsep=0.25em,topsep=0.35em}
-
 \newcommand{\PhiN}{\Phi}
-\newcommand{\1}{\mathbf{1}}
+\newcommand{\ind}{\mathbf{1}}
 \newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
 
-\title{\vspace{-2em}Final Simulation Design and Algorithms\\
-\large Product-Mixture Probit Factors versus Viroli-Style Gibbs Baselines}
+\title{\vspace{-2em}Signal-Support Simulation Design\\
+\large Product-Mixture MAP versus Viroli-Style Probit Gibbs}
 \author{}
-\date{\vspace{-1em}}
+\date{\vspace{-1.5em}}
 
 \begin{document}
 \maketitle
 
-\section{Goal}
+\section{Purpose}
 
-The purpose of this simulation is to stress-test computation and parameter
-recovery in high-dimensional binary factor mixture models.  The comparison is
-designed around the regime that motivates the IFEval analysis: small to
-moderate numbers of systems, many binary items, sparse but overlapping item
-loadings, non-Gaussian factor coordinates, and item intercepts.
-
-The central question is whether the product-mixture MAP estimator can recover
-the factor scores, loadings, intercepts, and marginal mixture parameters more
-accurately or more quickly than full Gibbs sampling baselines that fit the same
-latent factor structure.
+The simulation asks when the proposed product-mixture MAP estimator can recover
+a high-dimensional binary factor mixture model.  The working hypothesis is that
+performance is governed less by $p$ alone and more by the strength and support
+of the probit signal: how large the nonzero item loadings are, how many items
+load on each factor, and how much signed cross-loading connects factors.
 
 \section{Data-Generating Model}
 
-For each replication and each simulation setting, we generate binary data from
-\begin{align}
-  \eta_{ih} \mid c_{ih}=g
-    &\sim N(\mu_{hg}, \sigma_{hg}^2),
-    & c_{ih} &\sim \mathrm{Categorical}(\pi_{h1},\ldots,\pi_{hG_h}), \\
-  Z_{ij} \mid \bm\eta_i
-    &\sim N(\alpha_j + \bm\lambda_j^\top \bm\eta_i, 1), \\
-  X_{ij} &= \1\{Z_{ij}>0\}.
-\end{align}
-The factor coordinates are independent in the data-generating distribution, so
-the joint factor density has product structure
+Each replication generates
 \[
-  p(\bm\eta_i) = \prod_{h=1}^H
-  \sum_{g=1}^{G_h} \pi_{hg}\,
-  \phi(\eta_{ih};\mu_{hg},\sigma_{hg}^2).
+  X_{ij} = \ind\{Z_{ij}>0\}, \qquad
+  Z_{ij} = \alpha_j + \bm\lambda_j^\top \bm F_i + \epsilon_{ij},
+  \qquad \epsilon_{ij}\sim N(0,1).
 \]
-All methods are evaluated on exactly the same simulated data for a given
-setting and replication.
+The factor coordinates are independent marginal mixtures:
+\[
+  F_{ih}\sim \sum_{g=1}^{G_h}\pi_{hg}
+  N(\mu_{hg},\sigma_{hg}^2), \qquad h=1,\ldots,H.
+\]
+The generated factors are standardized to the canonical marginal mean-zero,
+unit-variance scale.  Item intercepts are included in all simulations using
+the IFEval-like intercept generator.
 
 \section{Simulation Grid}
 
-The final grid is
-\[
-  n \in \{100,200,300,400\}, \quad
-  p \in \{500,1000,2000,4000\}, \quad
-  H \in \{5,10,15,20\},
-\]
-\[
-  G \in \{2,3\}, \quad
-  \mathrm{separation} \in \{1,2\}, \quad
-  \mathrm{replications}=25.
-\]
-Unless overridden, the loading design is the IFEval-like ``Cross'' design: item
-blocks are moderately unbalanced and items primarily load on one factor while
-also having sparse cross-loadings.  Intercepts are included using the
-IFEval-like block intercept pattern.
-
-\begin{table}[h]
-\centering
-\small
-\begin{tabular}{L{0.34\linewidth}L{0.56\linewidth}}
+\begin{center}
+\begin{tabular}{L{0.34\linewidth}L{0.52\linewidth}}
 \toprule
-Quantity & Default in final launcher \\
+Quantity & Values \\
 \midrule
-Script & \path{scripts/sample_size/run_final_product_viroli_simulation.R} \\
-Core driver & \path{scripts/sample_size/compare_original_simulation_joint_mfa_gibbs.R} \\
-DGP utilities & \path{R/sample_size_dgp.R} \\
-Loading design & \texttt{balanced\_moderate\_dense\_signed\_cross} \\
-Block sizes & \texttt{moderate\_ifeval\_like} \\
-Mixture parameters & \texttt{viroli\_smoke} \\
-Product MAP penalty & \texttt{LAMBDA\_L1\_PENALTY=10} \\
-Pretraining loading penalty & \texttt{PRETRAIN\_LOADING\_PENALTY=10} \\
-Rotation loading penalty & \texttt{ROTATION\_LOADING\_L1\_PENALTY=10} \\
-Viroli Laplace penalty & \texttt{VIROLI\_LAPLACE\_L1\_PENALTY=10} \\
-Gibbs iterations & 2000 total, 1000 burn-in, thinning 1 \\
+Sample size & $n\in\{100,200\}$ \\
+Items & $p\in\{500,1000,1500,2000\}$ for Product MAP \\
+Gibbs item counts & $p\in\{500,1000\}$ only \\
+Factors & $H\in\{5,10,15,20\}$ \\
+Mixture components & $G_h=2$ for all $h$ or $G_h=3$ for all $h$ \\
+Replications & 25 per setting \\
+Mixture separation & 1 \\
+Block sizes & balanced or IFEval-like unbalanced \\
+Loading design & Cross/IFEval-like sparse signed cross-loadings \\
+Loading strength & weak: $|\lambda|\sim U(1.25,1.75)$; strong: $|\lambda|\sim U(2.50,3.00)$ \\
+Cross-loading probability & 0.075 or 0.20 \\
+Cross-loading signs & random signs \\
 \bottomrule
 \end{tabular}
-\end{table}
+\end{center}
 
-To manage runtime, the product MAP estimator is run over the full $p$ grid by
-default.  The Viroli Gibbs baselines are run for the smaller $p$ grid specified
-by \texttt{P\_VALUES\_VIROLI}; the default is $p\in\{500,1000\}$.  This is an
-explicit runtime policy, not a change in the estimand.
+The loading strength range is applied to both primary loadings and nonzero
+cross-loadings.  Primary loadings are positive.  Cross-loadings are randomly
+positive or negative.  Representative loading matrices are generated by
+\texttt{scripts/sample\_size/plot\_dgp\_loading\_heatmaps.R}.
 
-\section{Method 1: Product-Mixture MAP}
+\section{Product-Mixture MAP}
 
-The product MAP method has three stages: estimate the low-rank probit signal,
-rotate the estimated score space toward independent marginal mixtures, and
-refine all parameters by MAP.
+The proposed estimator has three stages.
 
-\subsection{Stage 1: Low-Rank Probit Signal}
-
-Instead of sampling an augmented matrix $Z$, the first stage estimates the
-rank-$H$ signal matrix $B$ in the probit likelihood
+\paragraph{Low-rank probit signal.}
+First estimate the item intercepts and centered rank-$H$ probit signal
+$B=F\Lambda^\top$ by maximizing
 \[
   \ell(\bm\alpha,B)
   =
-  \sum_{i=1}^n \sum_{j=1}^p
+  \sum_{i,j}
   \left[
-  X_{ij}\log \PhiN(\alpha_j + B_{ij})
-  +(1-X_{ij})\log\{1-\PhiN(\alpha_j + B_{ij})\}
+  X_{ij}\log \PhiN(\alpha_j+B_{ij})
+  +(1-X_{ij})\log\{1-\PhiN(\alpha_j+B_{ij})\}
   \right],
-  \qquad \mathrm{rank}(B)\le H .
+  \qquad \mathrm{rank}(B)\le H.
 \]
-This is a direct likelihood target for the latent linear predictor
-$B=F\Lambda^\top$.  The implementation uses a simple EM-SVD routine:
+The implementation uses an EM-SVD update: compute conditional expectations of
+the latent probit variables, update intercepts, and project the centered
+working matrix onto rank $H$.  This stage estimates the signal subspace
+directly and avoids repeated sampled-$Z$ augmentation in the proposed method.
 
-\begin{enumerate}
-\item Given the current $\bm\alpha$ and $B$, compute the conditional
-expectation of the truncated Gaussian latent variable $Z_{ij}$ under the
-binary probit observation.
-\item Update $\bm\alpha$ and project the centered conditional expectation
-matrix onto rank $H$ using an SVD.
-\item Stop when the probit log likelihood or the low-rank signal changes by
-less than the tolerance, or when the maximum iteration count is reached.
-\end{enumerate}
+\paragraph{Rotation.}
+The SVD of $\widehat B$ gives left singular-vector scores spanning the signal
+subspace, but the axes are rotationally unidentified.  The rotation stage
+searches for an orthogonal rotation whose coordinates are well fit by
+independent univariate Gaussian mixtures while also encouraging sparse
+loadings.  The default implementation uses Riemannian rotation with an
+$\ell_1$ loading penalty.
 
-The output is $\widehat B$.  Its SVD gives
+\paragraph{MAP refinement.}
+Starting from the rotated scores, the refinement stage alternates updates of
+factor scores, item intercepts/loadings, and marginal mixture parameters.  The
+loadings are estimated with an $\ell_1$ penalty.  Refinement uses monotone
+objective monitoring and stops only after the posterior objective is stable
+and, by default, all marginal mixture updates have converged.
+
+The default Product MAP penalties are
 \[
-  \widehat B = \widehat U \widehat D \widehat V^\top,
-  \qquad
-  \widehat S = \sqrt n\,\widehat U,
-  \qquad
-  \widehat \Lambda_{\mathrm{svd}} =
-  \widehat V \widehat D/\sqrt n .
+  \lambda_{\mathrm{pretrain}}=
+  \lambda_{\mathrm{rotation}}=
+  \lambda_{\mathrm{refine}}=10.
 \]
-Under standard low-rank probit regularity conditions, consistency of
-$\widehat B$ implies consistency of the estimated signal subspace, which
-provides a principled initialization for the left singular vector space.  This
-stage is the main computational improvement over sampled-$Z$ pretraining: it
-targets the binary likelihood directly and avoids repeated augmentation draws.
 
-\subsection{Stage 2: Rotation}
+\section{Viroli-Style Gibbs Baselines}
 
-The SVD identifies the rank-$H$ subspace but not the independent coordinate
-axes.  The rotation stage searches over orthogonal matrices $R$ and evaluates
+Both Gibbs baselines fit the independent marginal mixture factor model with
+probit augmentation.  Each iteration samples truncated latent probit variables,
+factor scores, marginal component labels, mixture weights, mixture means,
+mixture variances, item intercepts, and item loadings.  Posterior draws are
+normalized to the same factor scale used in the DGP.
+
+The Laplace baseline uses the Bayesian lasso scale-mixture representation for
+the loading prior, with penalty 10.  The diffuse Gaussian baseline replaces
+that prior with a weak Gaussian loading prior.  Both are run for 2000
+iterations, discarding the first 1000 as burn-in.  Effective sample sizes are
+recorded for parameters when enabled.
+
+\section{Parallelization}
+
+Product MAP uses one simulation chunk at a time by default, with internal
+parallel workers for independent marginal mixture fits, itemwise loading
+regressions, and subject-wise factor-score updates.  Gibbs is parallelized
+across independent task chunks, so separate replications/configurations run
+concurrently.  This avoids the overhead that previously made within-chain
+parallel Gibbs unattractive in these R implementations.
+
+\section{Recorded Results}
+
+Each row records the full DGP settings, method settings, convergence
+diagnostics, elapsed seconds, and recovery metrics:
 \[
-  Q(R)
-  =
-  \sum_{h=1}^H
-  \max_{q_h \in \mathcal M_{G_h}}
-  \frac{1}{n}\sum_{i=1}^n \log q_h\{(\widehat S R)_{ih}\}
-  -
-  \lambda_{\mathrm{rot}}
-  \|\widehat \Lambda_{\mathrm{svd}}R\|_1 .
+  \mathrm{RMSE}(F),\quad
+  \mathrm{RMSE}(\Lambda),\quad
+  \mathrm{RMSE}(\alpha),\quad
+  \mathrm{RMSE}(\mu),\quad
+  \mathrm{RMSE}(\sigma^2),\quad
+  \mathrm{RMSE}(\pi).
 \]
-The first term rewards rotated coordinates that are well described by
-one-dimensional Gaussian mixtures.  The second term favors sparse rotated
-loadings.  The implementation performs pairwise Givens sweeps, fitting the
-marginal mixtures by EM/MAP after candidate rotations.  The rotation stage is
-terminated only after the rotation objective is stable and, by default, all
-inner marginal mixtures have converged.
+The product estimator also records first-stage signal diagnostics, including
+relative Frobenius error for $\widehat B$ and the sine of the principal-angle
+operator-norm error for the estimated signal subspace.  These diagnostics are
+intended to separate failures of binary signal estimation from failures of
+rotation or MAP refinement.
 
-\subsection{Stage 3: MAP Refinement}
+\section{Replication}
 
-Starting from the rotated scores and loadings, the refinement stage alternates:
-\begin{enumerate}
-\item Update factor scores by MAP under the probit likelihood and current
-marginal mixture prior.
-\item Update item intercepts and sparse loadings by itemwise penalized probit
-regressions, using an $\ell_1$ penalty on loadings.
-\item Update the marginal mixture means, variances, and weights by MAP.
-\end{enumerate}
-The refinement objective is monitored after each full sweep.  The monotonicity
-guard rejects a sweep if the selected posterior objective decreases beyond a
-small tolerance.  The stage stops when the posterior objective is stable after
-the minimum number of iterations and, by default, the marginal mixture fits have
-also converged.
-
-\section{Method 2: Viroli-Style Gibbs with Laplace Loadings}
-
-This baseline fits the correctly specified independent marginal mixture factor
-model by Gibbs sampling with probit augmentation.  Each iteration updates:
-\begin{enumerate}
-\item $Z_{ij}$ from its truncated normal full conditional given $X_{ij}$,
-$\alpha_j$, $\bm\lambda_j$, and $\bm\eta_i$.
-\item The factor scores $\bm\eta_i$ and coordinate-wise component labels
-$c_{ih}$.
-\item Marginal mixture weights, means, and variances for each factor
-coordinate.
-\item Item intercepts and loadings.
-\end{enumerate}
-The Laplace loading prior is implemented through the Bayesian lasso scale
-mixture representation.  Posterior draws are normalized to the convention that
-each factor coordinate has marginal mixture mean zero and variance one, with
-the corresponding inverse transformation applied to $\bm\alpha$ and $\Lambda$
-so that the probit linear predictor is unchanged.  The sampler keeps 1000
-posterior draws after 1000 burn-in iterations.
-
-\section{Method 3: Viroli-Style Gibbs with Diffuse Gaussian Loadings}
-
-The Gaussian Viroli baseline uses the same probit augmentation and independent
-marginal mixture factor prior as the Laplace version, but replaces the Bayesian
-lasso loading prior with a diffuse Gaussian loading prior.  This isolates how
-much of the Gibbs performance comes from the sampling scheme itself versus the
-sparsity prior on $\Lambda$.
-
-\section{Alignment and Metrics}
-
-All methods are aligned to the data-generating factors using the same
-permutation and sign strategy.  The final launcher uses loading-based alignment
-by default: it chooses the permutation and sign pattern that best matches the
-data-generating loading matrix, then applies the same transformation to factor
-scores and mixture parameters.  Factor-score alignment can be requested with
-\texttt{ALIGNMENT\_MODE=factors}.  After alignment, the reported metrics are:
-\begin{itemize}
-\item factor-score RMSE, computed after standardizing true and estimated scores;
-\item loading RMSE and loading correlation;
-\item item-intercept RMSE and correlation;
-\item marginal mixture mean, variance, and weight RMSE;
-\item predictive probability RMSE;
-\item elapsed seconds per replication;
-\item effective sample size summaries for Gibbs posterior draws;
-\item DGP diagnostics, including item prevalence summaries, empty marginal
-components, and the number of observed joint profiles.
-\end{itemize}
-When $G^H$ is small enough, the driver also writes joint mixture recovery
-tables.  For large $H$, these dense joint tables are intentionally skipped and
-the marginal mixture summaries are used instead; this avoids constructing
-objects of size $G^H$ when $G^H$ can exceed billions.
-
-\section{Reproducibility}
-
-Run the final simulation from the repository root:
+From the repository root:
 \[
 \texttt{Rscript scripts/sample\_size/run\_final\_product\_viroli\_simulation.R}.
 \]
-The script is checkpointed through
-\texttt{comparison\_results\_checkpoint.csv}.  Re-running the same command with
-\texttt{RESUME\_EXISTING=TRUE} skips completed scenario-method pairs.  The
-main output directory is
+Progress plots can be regenerated at any point with
 \[
-\texttt{results/full/final\_cross\_ifeval\_product\_viroli/}.
+\texttt{Rscript scripts/sample\_size/plot\_signal\_support\_simulation\_progress.R}.
 \]
-The final driver records the full simulation setting on every row, including
-the random seed scheme, penalties, mixture priors, convergence flags, elapsed
-time, and diagnostics.  This makes the raw CSV the first place to audit any
-surprising result.
+The full raw output is written to
+\texttt{results/full/signal\_support\_grid}; selected GitHub-facing plots and
+tables are written under \texttt{results/selected\_plots} and
+\texttt{results/selected\_tables}.
 
 \end{document}

@@ -1,0 +1,182 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm,bm}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{xcolor}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!55!black,
+  citecolor=blue!55!black,
+  urlcolor=blue!55!black
+}
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Prob}{\mathbb{P}}
+\newcommand{\Normal}{\mathcal{N}}
+\newcommand{\Orth}{\mathcal{O}}
+\newcommand{\argmax}{\operatorname*{arg\,max}}
+\newcommand{\argmin}{\operatorname*{arg\,min}}
+\newcommand{\diag}{\operatorname{diag}}
+\newcommand{\rank}{\operatorname{rank}}
+\newcommand{\PhiN}{\Phi}
+\newcommand{\independent}{\mathrel{\perp\!\!\!\perp}}
+
+\title{A Likelihood-Based Pretraining and Refinement Algorithm\\
+for Probit Independent-Mixture Factor Models}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section{Why Estimate the Signal Before Augmenting?}
+
+The key advantage of the likelihood-based pretraining step is that it targets
+the identifiable signal first.  In the probit factor model,
+\[
+  \Prob(X_{ij}=1)=\PhiN(\alpha_j+B_{ij}),
+  \qquad
+  B=F\Lambda^\top,
+\]
+the systematic low-rank object is \(B\).  By contrast, an augmented latent
+Gaussian draw satisfies
+\[
+  Z_{ij}=\alpha_j+B_{ij}+\epsilon_{ij}.
+\]
+Thus an SVD of an augmented \(Z\) matrix is trying to recover the low-rank
+signal from a noisy latent realization.  Even if the augmentation is correctly
+specified, the sampled noise can perturb the singular vectors, introduce
+Monte Carlo variation, and slow the initialization.
+
+The alternative is to estimate \(B\) directly from the binary probit
+likelihood and then take the SVD of \(\widehat B\).  This gives a cleaner
+initial estimate of the signal subspace, avoids repeated stochastic
+augmentation during pretraining, and provides a more direct theoretical route:
+if \(\widehat B\) consistently estimates the low-rank response surface, then
+its singular subspace consistently estimates the latent factor subspace.  The
+subsequent rotation and refinement stages then operate on a likelihood-based
+estimate of the systematic signal rather than on noisy augmented draws.
+
+\section{Goal}
+
+The main goal of pretraining is not to estimate uniquely identified factors
+and loadings.  It is to estimate the low-rank probit response surface.  We
+write
+\[
+  \Theta = \bm 1_n\alpha^\top + B,
+  \qquad
+  B=F\Lambda^\top,\qquad \rank(B)\leq H.
+\]
+The product \(B\) is identified by the binary likelihood, while a particular
+factorization \(B=F\Lambda^\top\) is not unique.  This distinction is the
+reason for the staged strategy: first estimate \(B\) and its subspace, then
+rotate that subspace into mixture-factor coordinates, and finally refine the
+full structured model.
+
+\section{Stage 1: Estimate the Low-Rank Signal}
+
+For a supplied or selected working rank \(H\), the first stage estimates
+\((\alpha,B)\) by maximizing the rank-constrained probit likelihood
+\begin{equation}
+  (\widehat\alpha,\widehat B)
+  \in
+  \argmax_{\alpha,\,B:\ \rank(B)\leq H,\; \bm 1_n^\top B=0}
+  \ell_H(\alpha,B),
+  \label{eq:B-objective}
+\end{equation}
+where
+\begin{equation}
+  \ell_H(\alpha,B)=
+  \sum_{i=1}^n\sum_{j=1}^p
+  \left[
+    X_{ij}\log\PhiN(\alpha_j+B_{ij})
+    +(1-X_{ij})\log\{1-\PhiN(\alpha_j+B_{ij})\}
+  \right].
+\end{equation}
+The centering constraint separates item intercepts from the low-rank
+interaction.  Under mild regularity conditions, this likelihood-based step
+recovers the population rank-\(H\) signal subspace.  Taking the SVD of
+\(\widehat B\) then gives a consistent initialization of the left singular
+subspace; when the working rank matches the data-generating rank, this is the
+true factor-score subspace.
+
+Computationally, this can be done with a simple deterministic EM-SVD
+algorithm.  Given the current low-rank signal, the E-step computes
+\[
+  W_{ij}=\E\{Z_{ij}\mid X_{ij},\alpha_j+B_{ij}\},
+\]
+using the usual truncated-normal probit formula.  The M-step projects \(W\)
+back onto the constrained low-rank class: set
+\(\widehat\alpha=\operatorname{colMeans}(W)\), center \(W\) by columns, and
+take the rank-\(H\) SVD.  Thus the rank constraint is enforced by SVD
+truncation and the intercept constraint is enforced by column-centering.
+
+This removes the need to use stochastic augmented-\(Z\) draws as the
+pretraining estimator.  The latent-Gaussian representation is still useful for
+EM calculations, but the target is the observed binary likelihood in
+\eqref{eq:B-objective}.  In practice this is faster because pretraining no
+longer repeatedly samples full \(n\times p\) augmented matrices and recomputes
+the rotation from noisy draws.  Instead, each EM iteration uses deterministic
+conditional means followed by a low-rank SVD projection.
+
+\section{Stage 2: Rotate the Subspace}
+
+After estimating \(\widehat B\), we take a convenient factorization, for
+example from the SVD,
+\[
+  \widehat B=\widehat F\widehat\Lambda^\top.
+\]
+These scores estimate the correct subspace, but their axes are arbitrary up
+to rotation.  The mixture assumption supplies the missing orientation: we look
+for the rotation under which the score coordinates look like independent
+one-dimensional mixtures.  This is the ICA-like step of the algorithm.
+
+\section{Stage 3: Refine the Structured Model}
+
+Starting from the rotated scores, the refinement stage updates the full
+product-mixture factor model:
+\[
+  \alpha,\quad F,\quad \Lambda,\quad
+  \{\pi_{hg},\mu_{hg},\sigma^2_{hg}\}.
+\]
+In our current implementation, refinement uses MAP mixture updates and can
+include sparsity penalties on the loadings.  The practical point is that
+refinement starts from a likelihood-based estimate of the rank-\(H\) subspace,
+rather than from a noisy sampled augmentation.  The refinement step is where
+the model moves from a good low-rank probit representation to the full
+independent-mixture factor model used for interpretation and prediction.
+
+\paragraph{Reporting convention.}
+The final fitted model is still invariant to location, scale, sign, and column
+ordering conventions.  After convergence, we apply a canonical normalization
+only for reporting.  If \(m_h\) and \(s_h\) are the fitted marginal mixture
+mean and standard deviation for factor \(h\), set
+\[
+  f_{ih}^\star=\frac{f_{ih}-m_h}{s_h},
+  \qquad
+  \lambda_{jh}^\star=s_h\lambda_{jh},
+  \qquad
+  \alpha_j^\star=\alpha_j+\sum_h\lambda_{jh}m_h.
+\]
+This preserves the probit linear predictor:
+\[
+  \alpha_j+\bm f_i^\top\bm\lambda_j
+  =
+  \alpha_j^\star+(\bm f_i^\star)^\top\bm\lambda_j^\star.
+\]
+So the fitted probabilities do not change; only the parameter convention
+changes.
+
+\section{Code Pointers}
+
+The main implementation is \path{R/probit_ifa_em_svd_pretraining.R}, which
+contains the low-rank EM-SVD fit, the mixture-rotation pretrainer, and the
+pretrain-then-refine wrapper.  The simulation checks are in
+\path{scripts/sample_size/}: \path{test_em_svd_pretraining_simulation.R} and
+\path{test_final_canonical_normalization.R}.
+
+\end{document}
