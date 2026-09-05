@@ -222,13 +222,14 @@ plot_metric_boxplots <- function(d, metric, ylab, out_file, title) {
   invisible(TRUE)
 }
 
+run_label <- get_env("RUN_LABEL", "signal_support_grid_hybrid_parallel")
 results_dir <- get_env(
   "RESULTS_DIR",
-  file.path(repo_root, "results", "full", get_env("RUN_LABEL", "signal_support_grid"))
+  file.path(repo_root, "results", "full", run_label)
 )
 plot_dir <- get_env(
   "PLOT_DIR",
-  file.path(repo_root, "results", "selected_plots", "sample_size", "signal_support_grid")
+  file.path(repo_root, "results", "selected_plots", "sample_size", run_label)
 )
 table_dir <- get_env(
   "TABLE_DIR",
@@ -242,7 +243,7 @@ if (!nrow(results)) stop("No result rows found in ", results_dir)
 
 write.csv(
   results,
-  file.path(table_dir, "signal_support_grid_completed_results.csv"),
+  file.path(table_dir, paste0(run_label, "_completed_results.csv")),
   row.names = FALSE
 )
 
@@ -305,6 +306,6 @@ for (key in levels(setting_key)) {
 }
 
 cat("Wrote completed-results table to:\n")
-cat(file.path(table_dir, "signal_support_grid_completed_results.csv"), "\n")
+cat(file.path(table_dir, paste0(run_label, "_completed_results.csv")), "\n")
 cat("Wrote plots to:\n")
 cat(plot_dir, "\n")
