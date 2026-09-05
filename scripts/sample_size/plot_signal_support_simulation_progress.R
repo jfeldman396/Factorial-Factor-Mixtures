@@ -222,7 +222,7 @@ plot_metric_boxplots <- function(d, metric, ylab, out_file, title) {
   invisible(TRUE)
 }
 
-run_label <- get_env("RUN_LABEL", "signal_support_grid_hybrid_parallel")
+run_label <- get_env("RUN_LABEL", "signal_support_grid_adaptive_product_workers")
 results_dir <- get_env(
   "RESULTS_DIR",
   file.path(repo_root, "results", "full", run_label)
