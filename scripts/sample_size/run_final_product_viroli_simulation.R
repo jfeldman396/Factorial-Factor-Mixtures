@@ -9,10 +9,9 @@
 # default because those are the direct timing/accuracy comparison cells.
 #
 # Replications are run serially at the launcher level.  Within each replication,
-# method-specific updates use a small tuned number of workers: Product MAP and
-# Viroli use 4 workers for p <= 1000, while Product MAP uses 6 workers for
-# p > 1000.  This keeps the timing comparison clean while still using internal
-# parallelization where the method benefits from it.
+# the methods use their pre-declared optimized internal worker settings:
+# Product MAP uses 18 workers for all p, while Viroli/Gibbs uses one serial
+# chain worker for p=500 and four internal workers for p=1000.
 
 options(stringsAsFactors = FALSE)
 
@@ -205,26 +204,25 @@ cross_loading_probs <- parse_nums(get_env("CROSS_LOADING_PROBS", "0.075,0.2"))
 block_modes <- split_csv(get_env("BLOCK_SIZE_MODES", "balanced,ifeval_like"))
 rep_values <- parse_ints(get_env("REP_VALUES", paste(seq_len(25L), collapse = ",")))
 separations <- get_env("SEPARATIONS", "1")
-run_label <- get_env("RUN_LABEL", "signal_support_grid_adaptive_product_workers")
+run_label <- get_env("RUN_LABEL", "signal_support_grid_optimized_workers")
 out_dir <- get_env("OUT_DIR", file.path(repo_root, "results", "full", run_label))
 chunk_dir <- file.path(out_dir, "chunks")
 dir.create(chunk_dir, recursive = TRUE, showWarnings = FALSE)
 
 product_task_workers <- as.integer(get_env("TASK_WORKERS_PRODUCT", "1"))
+product_internal_workers <- get_env("PRODUCT_INTERNAL_WORKERS", "18")
 product_internal_workers_small_p <- get_env(
   "PRODUCT_INTERNAL_WORKERS_SMALL_P",
-  get_env("PRODUCT_INTERNAL_WORKERS", "4")
+  product_internal_workers
 )
-product_internal_workers_large_p <- get_env("PRODUCT_INTERNAL_WORKERS_LARGE_P", "6")
+product_internal_workers_large_p <- get_env(
+  "PRODUCT_INTERNAL_WORKERS_LARGE_P",
+  product_internal_workers
+)
+gibbs_parallel_p_min <- as.integer(get_env("GIBBS_PARALLEL_P_MIN", "1000"))
 gibbs_task_workers <- as.integer(get_env("TASK_WORKERS_GIBBS", "1"))
-gibbs_internal_workers_small_p <- get_env(
-  "GIBBS_INTERNAL_WORKERS_SMALL_P",
-  get_env("GIBBS_INTERNAL_WORKERS", product_internal_workers_small_p)
-)
-gibbs_internal_workers_large_p <- get_env(
-  "GIBBS_INTERNAL_WORKERS_LARGE_P",
-  get_env("GIBBS_INTERNAL_WORKERS", product_internal_workers_large_p)
-)
+gibbs_internal_workers_serial <- get_env("GIBBS_INTERNAL_WORKERS_SERIAL", "1")
+gibbs_internal_workers_parallel <- get_env("GIBBS_INTERNAL_WORKERS_PARALLEL", "4")
 
 common_env <- c(
   SEED = get_env("SEED", "20260731"),
@@ -310,7 +308,7 @@ make_tasks <- function(
     method,
     product_inner_workers = product_internal_workers_small_p,
     gibbs_parallel = FALSE,
-    gibbs_inner_workers = gibbs_internal_workers_small_p) {
+    gibbs_inner_workers = gibbs_internal_workers_serial) {
   tasks <- list()
   for (block_mode in block_modes) {
     for (strength in loading_strengths) {
@@ -403,16 +401,17 @@ cat("Cross-loading probabilities:", paste(cross_loading_probs, collapse = ", "),
 cat("Block modes:", paste(block_modes, collapse = ", "), "\n")
 cat("Reps per cell:", length(rep_values), "\n")
 cat("Product task workers:", product_task_workers, "\n")
-cat("Product internal workers for p <= 1000:", product_internal_workers_small_p, "\n")
-cat("Product internal workers for p > 1000:", product_internal_workers_large_p, "\n")
+cat("Product internal workers:", product_internal_workers, "\n")
 cat("Gibbs/Viroli task workers:", gibbs_task_workers, "\n")
-cat("Gibbs/Viroli internal workers for p <= 1000:", gibbs_internal_workers_small_p, "\n")
-cat("Gibbs/Viroli internal workers for p > 1000:", gibbs_internal_workers_large_p, "\n")
+cat("Gibbs/Viroli serial-inner p values:", paste(p_values_gibbs[p_values_gibbs < gibbs_parallel_p_min], collapse = ", "), "\n")
+cat("Gibbs/Viroli parallel-inner p values:", paste(p_values_gibbs[p_values_gibbs >= gibbs_parallel_p_min], collapse = ", "), "\n")
+cat("Gibbs/Viroli serial-inner workers:", gibbs_internal_workers_serial, "\n")
+cat("Gibbs/Viroli parallel-inner workers:", gibbs_internal_workers_parallel, "\n")
 
 small_product_p <- p_values_product[p_values_product <= 1000]
 large_product_p <- p_values_product[p_values_product > 1000]
-gibbs_small_p <- p_values_gibbs[p_values_gibbs <= 1000]
-gibbs_large_p <- p_values_gibbs[p_values_gibbs > 1000]
+gibbs_serial_p <- p_values_gibbs[p_values_gibbs < gibbs_parallel_p_min]
+gibbs_parallel_p <- p_values_gibbs[p_values_gibbs >= gibbs_parallel_p_min]
 
 if (length(small_product_p)) {
   run_task_pool(
@@ -427,63 +426,62 @@ if (length(small_product_p)) {
     chunk_dir,
     "product_map_small_p"
   )
-  if (length(gibbs_small_p)) {
+  if (length(gibbs_serial_p)) {
     run_task_pool(
       make_tasks(
-        "smallp",
-        gibbs_small_p,
+        "smallp_serial",
+        gibbs_serial_p,
         "viroli_laplace",
-        gibbs_parallel = TRUE,
-        gibbs_inner_workers = gibbs_internal_workers_small_p
+        gibbs_parallel = FALSE,
+        gibbs_inner_workers = gibbs_internal_workers_serial
       ),
       gibbs_task_workers,
       out_dir,
       chunk_dir,
-      "viroli_laplace_small_p"
+      "viroli_laplace_serial_inner_p"
     )
     run_task_pool(
       make_tasks(
-        "smallp",
-        gibbs_small_p,
+        "smallp_serial",
+        gibbs_serial_p,
         "viroli_gaussian",
-        gibbs_parallel = TRUE,
-        gibbs_inner_workers = gibbs_internal_workers_small_p
+        gibbs_parallel = FALSE,
+        gibbs_inner_workers = gibbs_internal_workers_serial
       ),
       gibbs_task_workers,
       out_dir,
       chunk_dir,
-      "viroli_gaussian_small_p"
+      "viroli_gaussian_serial_inner_p"
     )
   }
-}
-
-if (length(gibbs_large_p)) {
-  run_task_pool(
-    make_tasks(
-      "largep",
-      gibbs_large_p,
-      "viroli_laplace",
-      gibbs_parallel = TRUE,
-      gibbs_inner_workers = gibbs_internal_workers_large_p
-    ),
-    gibbs_task_workers,
-    out_dir,
-    chunk_dir,
-    "viroli_laplace_large_p"
-  )
-  run_task_pool(
-    make_tasks(
-      "largep",
-      gibbs_large_p,
-      "viroli_gaussian",
-      gibbs_parallel = TRUE,
-      gibbs_inner_workers = gibbs_internal_workers_large_p
-    ),
-    gibbs_task_workers,
-    out_dir,
-    chunk_dir,
-    "viroli_gaussian_large_p"
-  )
+  if (length(gibbs_parallel_p)) {
+    run_task_pool(
+      make_tasks(
+        "smallp_parallel",
+        gibbs_parallel_p,
+        "viroli_laplace",
+        gibbs_parallel = TRUE,
+        gibbs_inner_workers = gibbs_internal_workers_parallel
+      ),
+      gibbs_task_workers,
+      out_dir,
+      chunk_dir,
+      "viroli_laplace_parallel_inner_p"
+    )
+    run_task_pool(
+      make_tasks(
+        "smallp_parallel",
+        gibbs_parallel_p,
+        "viroli_gaussian",
+        gibbs_parallel = TRUE,
+        gibbs_inner_workers = gibbs_internal_workers_parallel
+      ),
+      gibbs_task_workers,
+      out_dir,
+      chunk_dir,
+      "viroli_gaussian_parallel_inner_p"
+    )
+  }
 }
 
 if (length(large_product_p)) {
