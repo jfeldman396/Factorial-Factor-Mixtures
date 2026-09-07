@@ -18,6 +18,12 @@ get_env <- function(name, default) {
   if (nzchar(value)) value else default
 }
 
+split_csv <- function(x) {
+  if (!nzchar(x)) return(character(0))
+  out <- trimws(strsplit(x, ",", fixed = TRUE)[[1L]])
+  out[nzchar(out)]
+}
+
 safe_token <- function(x) {
   x <- as.character(x)
   x <- gsub("[^A-Za-z0-9]+", "_", x)
@@ -420,15 +426,27 @@ table_dir <- get_env(
   "TABLE_DIR",
   file.path(repo_root, "results", "selected_tables", "sample_size")
 )
+method_filter <- split_csv(get_env("METHOD_FILTER", ""))
+output_tag <- get_env("OUTPUT_TAG", "")
+if (!nzchar(output_tag) && identical(method_filter, "independent_marginal_mixture")) {
+  output_tag <- "product_map_only"
+}
+output_prefix <- if (nzchar(output_tag)) paste0(safe_token(output_tag), "_") else ""
 dir.create(plot_dir, recursive = TRUE, showWarnings = FALSE)
 dir.create(table_dir, recursive = TRUE, showWarnings = FALSE)
 
 results <- collect_results(results_dir)
 if (!nrow(results)) stop("No result rows found in ", results_dir)
+if (length(method_filter)) {
+  results <- results[results$method %in% method_filter, , drop = FALSE]
+  if (!nrow(results)) {
+    stop("No rows found after METHOD_FILTER=", paste(method_filter, collapse = ","), call. = FALSE)
+  }
+}
 
 write.csv(
   results,
-  file.path(table_dir, paste0(run_label, "_completed_results.csv")),
+  file.path(table_dir, paste0(run_label, "_", output_prefix, "completed_results.csv")),
   row.names = FALSE
 )
 
@@ -454,7 +472,7 @@ metrics <- list(
 cell_summary <- summarize_by_cell(results, metrics)
 write.csv(
   cell_summary,
-  file.path(table_dir, paste0(run_label, "_cell_summary.csv")),
+  file.path(table_dir, paste0(run_label, "_", output_prefix, "cell_summary.csv")),
   row.names = FALSE
 )
 
@@ -462,7 +480,7 @@ vs_gibbs <- make_vs_gibbs_table(cell_summary, metrics)
 if (nrow(vs_gibbs)) {
   write.csv(
     vs_gibbs,
-    file.path(table_dir, paste0(run_label, "_product_vs_gibbs_overlap.csv")),
+    file.path(table_dir, paste0(run_label, "_", output_prefix, "product_vs_gibbs_overlap.csv")),
     row.names = FALSE
   )
 }
@@ -490,7 +508,7 @@ for (key in levels(setting_key)) {
   plot_across_p_recovery_panel(
     d,
     metrics = metrics,
-    out_file = file.path(plot_dir, paste0("across_p_recovery_panel_", safe_token(setting_name), ".png")),
+    out_file = file.path(plot_dir, paste0(output_prefix, "across_p_recovery_panel_", safe_token(setting_name), ".png")),
     title = paste(title_base, "- recovery across p")
   )
   for (metric in names(metrics)) {
@@ -499,26 +517,26 @@ for (key in levels(setting_key)) {
       d,
       metric = metric,
       ylab = metrics[[metric]],
-      out_file = file.path(plot_dir, paste0("lines_", metric, "_", safe_token(setting_name), ".png")),
+      out_file = file.path(plot_dir, paste0(output_prefix, "lines_", metric, "_", safe_token(setting_name), ".png")),
       title = paste(title_base, "-", metrics[[metric]])
     )
     plot_metric_boxplots(
       d,
       metric = metric,
       ylab = metrics[[metric]],
-      out_file = file.path(plot_dir, paste0("boxplot_", metric, "_", safe_token(setting_name), ".png")),
+      out_file = file.path(plot_dir, paste0(output_prefix, "boxplot_", metric, "_", safe_token(setting_name), ".png")),
       title = paste(title_base, "-", metrics[[metric]])
     )
   }
 }
 
 cat("Wrote completed-results table to:\n")
-cat(file.path(table_dir, paste0(run_label, "_completed_results.csv")), "\n")
+cat(file.path(table_dir, paste0(run_label, "_", output_prefix, "completed_results.csv")), "\n")
 cat("Wrote cell summary table to:\n")
-cat(file.path(table_dir, paste0(run_label, "_cell_summary.csv")), "\n")
+cat(file.path(table_dir, paste0(run_label, "_", output_prefix, "cell_summary.csv")), "\n")
 if (nrow(vs_gibbs)) {
   cat("Wrote Product MAP vs Gibbs overlap table to:\n")
-  cat(file.path(table_dir, paste0(run_label, "_product_vs_gibbs_overlap.csv")), "\n")
+  cat(file.path(table_dir, paste0(run_label, "_", output_prefix, "product_vs_gibbs_overlap.csv")), "\n")
 } else {
   cat("Product MAP vs Gibbs overlap table not written yet; no overlapping Gibbs rows found.\n")
 }

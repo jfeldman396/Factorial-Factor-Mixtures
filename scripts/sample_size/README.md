@@ -23,6 +23,15 @@ simulation study.
    Rscript scripts/sample_size/plot_fixed_ifeval_lambda_progress.R
    ```
 
+   To plot only the Product MAP estimator:
+
+   ```bash
+   METHOD_FILTER=independent_marginal_mixture \
+   OUTPUT_TAG=product_map_only \
+   PLOT_DIR=results/selected_plots/sample_size/fixed_ifeval_lambda_min30_u2_3_cp0_05_h5_h10/product_map_only \
+   Rscript scripts/sample_size/plot_fixed_ifeval_lambda_progress.R
+   ```
+
 ## Script Roles
 
 - `run_fixed_ifeval_lambda_simulation.R`: high-level launcher for the fixed
