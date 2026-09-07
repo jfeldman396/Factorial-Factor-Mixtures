@@ -139,6 +139,8 @@ dgp_seed_mode <- get_env("DGP_SEED_MODE", "driver", as.character)
 if (!dgp_seed_mode %in% c("driver", "viroli_smoke")) {
   stop("DGP_SEED_MODE must be either 'driver' or 'viroli_smoke'.")
 }
+fix_dgp_parameters <- get_env("FIX_DGP_PARAMETERS", FALSE, as.logical)
+dgp_p_max <- get_env("DGP_P_MAX", NA_integer_, as.integer)
 g3_raw_sd <- get_env("G3_RAW_SD", c(0.25, 0.50, 0.75), parse_num_csv)
 if (length(g3_raw_sd) != 3L || any(!is.finite(g3_raw_sd)) || any(g3_raw_sd <= 0)) {
   stop("G3_RAW_SD must contain three positive numbers, e.g. G3_RAW_SD='0.25,0.50,0.30'.")
@@ -155,6 +157,7 @@ np_settings <- get_env(
   data.frame(np_regime = "smoke_wide", n = 80L, p = 120L),
   parse_np_grid
 )
+if (!is.finite(dgp_p_max) || is.na(dgp_p_max)) dgp_p_max <- max(np_settings$p)
 
 run_ours <- get_env("RUN_OURS", TRUE, as.logical)
 run_joint_mfa <- get_env("RUN_JOINT_MFA", TRUE, as.logical)
@@ -449,16 +452,55 @@ make_dgp_loadings <- function(design_name, p, H) {
   )
 }
 
-simulate_original_binary_probit <- function(n, p, H, G, sep, loading_design, seed) {
+simulate_original_binary_probit <- function(
+    n,
+    p,
+    H,
+    G,
+    sep,
+    loading_design,
+    seed,
+    dgp_seed = seed,
+    loading_seed = dgp_seed,
+    mixture_seed = dgp_seed + 7919L,
+    alpha_seed = loading_seed + 3571L,
+    fixed_dgp = FALSE,
+    p_master = p) {
+  # dgp_seed controls the population parameters.  seed controls the sampled
+  # dataset.  Keeping these separate lets a simulation fix Lambda, alpha, and
+  # mixture parameters within a design while still drawing a new dataset in
+  # every replication.
+  set.seed(mixture_seed)
+  mixture_params <- make_mixture_params(H, G, sep, seed = mixture_seed)
+  if (isTRUE(fixed_dgp)) {
+    p_master <- max(as.integer(p_master), as.integer(p))
+    set.seed(loading_seed)
+    master_loading <- make_dgp_loadings(loading_design, p_master, H)
+    loading_out <- subset_sample_size_loading_output(
+      master_loading,
+      p = p,
+      H = H,
+      block_size_mode = block_size_mode
+    )
+    master_alpha <- make_item_intercepts(
+      p = p_master,
+      H = H,
+      block_id = master_loading$block_id,
+      seed = alpha_seed
+    )
+    alpha <- master_alpha[loading_out$master_rows]
+  } else {
+    set.seed(loading_seed)
+    loading_out <- make_dgp_loadings(loading_design, p, H)
+    alpha <- make_item_intercepts(
+      p = p,
+      H = H,
+      block_id = loading_out$block_id,
+      seed = alpha_seed
+    )
+  }
+
   set.seed(seed)
-  mixture_params <- make_mixture_params(H, G, sep, seed = seed + 7919L)
-  loading_out <- make_dgp_loadings(loading_design, p, H)
-  alpha <- make_item_intercepts(
-    p = p,
-    H = H,
-    block_id = loading_out$block_id,
-    seed = seed + 3571L
-  )
   F <- matrix(NA_real_, n, H)
   component <- matrix(NA_integer_, n, H)
   standardized_params <- vector("list", H)
@@ -2122,6 +2164,30 @@ for (row_idx in seq_len(nrow(design_grid))) {
   }
   seed <- seed_base + 100000L * H_scenario + 50000L * sum(G_scenario * seq_along(G_scenario)) +
     10000L * row$rep + 1000L * row_idx
+  loading_index <- match(row$loading_design, unique(loading_designs))
+  block_index <- match(block_size_mode, c("balanced", "ifeval_like", "moderate_ifeval_like", "ifeval_min30"))
+  strength_index <- match(loading_strength, c("default", "weak", "strong"))
+  cross_prob_offset <- if (is.null(cross_loading_prob)) 0L else as.integer(round(10000 * cross_loading_prob))
+  loading_parameter_seed <- if (isTRUE(fix_dgp_parameters)) {
+    seed_base + 100000L * H_scenario +
+      5000L * loading_index + 1000L * block_index +
+      100L * strength_index + cross_prob_offset +
+      as.integer(round(1000 * row$separation))
+  } else {
+    seed
+  }
+  mixture_parameter_seed <- if (isTRUE(fix_dgp_parameters)) {
+    seed_base + 100000L * H_scenario +
+      50000L * sum(G_scenario * seq_along(G_scenario)) +
+      as.integer(round(1000 * row$separation))
+  } else {
+    seed
+  }
+  dgp_parameter_seed <- if (isTRUE(fix_dgp_parameters)) {
+    mixture_parameter_seed
+  } else {
+    seed
+  }
   scenario <- sprintf(
     "rep%d_%s_%s_cp%s_%s_n%d_p%d_H%d_G%s_sep%s",
     row$rep,
@@ -2152,11 +2218,17 @@ for (row_idx in seq_len(nrow(design_grid))) {
   sim <- simulate_original_binary_probit(
     n = np_row$n,
     p = np_row$p,
-      H = H_scenario,
-      G = G_scenario,
+    H = H_scenario,
+    G = G_scenario,
     sep = row$separation,
     loading_design = row$loading_design,
-    seed = seed
+    seed = seed,
+    dgp_seed = dgp_parameter_seed,
+    loading_seed = loading_parameter_seed,
+    mixture_seed = mixture_parameter_seed,
+    alpha_seed = loading_parameter_seed + 3571L,
+    fixed_dgp = fix_dgp_parameters,
+    p_master = dgp_p_max
   )
   dgp_summary <- dgp_diagnostics(sim, G_scenario)
   dgp_loading_settings <- loading_design_settings_summary()
@@ -2250,6 +2322,12 @@ for (row_idx in seq_len(nrow(design_grid))) {
       G_true = G_label,
       G_config = G_label,
       K_joint = K_joint,
+      fix_dgp_parameters = fix_dgp_parameters,
+      dgp_parameter_seed = dgp_parameter_seed,
+      loading_parameter_seed = loading_parameter_seed,
+      mixture_parameter_seed = mixture_parameter_seed,
+      data_seed = seed,
+      dgp_p_max = dgp_p_max,
       separation = row$separation,
       mixture_param_mode = mixture_param_mode,
       mixture_variance_mode = mixture_variance_mode,
@@ -2409,6 +2487,12 @@ for (row_idx in seq_len(nrow(design_grid))) {
       G_true = G_label,
       G_config = G_label,
       K_joint = K_joint,
+      fix_dgp_parameters = fix_dgp_parameters,
+      dgp_parameter_seed = dgp_parameter_seed,
+      loading_parameter_seed = loading_parameter_seed,
+      mixture_parameter_seed = mixture_parameter_seed,
+      data_seed = seed,
+      dgp_p_max = dgp_p_max,
       separation = row$separation,
       mixture_param_mode = mixture_param_mode,
       mixture_variance_mode = mixture_variance_mode,
@@ -2553,6 +2637,12 @@ for (row_idx in seq_len(nrow(design_grid))) {
       G_true = G_label,
       G_config = G_label,
       K_joint = K_joint,
+      fix_dgp_parameters = fix_dgp_parameters,
+      dgp_parameter_seed = dgp_parameter_seed,
+      loading_parameter_seed = loading_parameter_seed,
+      mixture_parameter_seed = mixture_parameter_seed,
+      data_seed = seed,
+      dgp_p_max = dgp_p_max,
       separation = row$separation,
       mixture_param_mode = mixture_param_mode,
       mixture_variance_mode = mixture_variance_mode,
@@ -2618,6 +2708,8 @@ summarize_results <- function(results) {
   if (!nrow(results)) return(data.frame())
   group_cols <- c(
     "method", "np_regime", "n", "p", "H_true", "G_true", "K_joint",
+    "fix_dgp_parameters", "dgp_parameter_seed", "loading_parameter_seed",
+    "mixture_parameter_seed", "dgp_p_max",
     "separation", "mixture_param_mode", "mixture_variance_mode", "loading_design",
     "block_size_mode", "loading_sign_mode", "loading_strength",
     "primary_loading_min", "primary_loading_max", "cross_loading_min",

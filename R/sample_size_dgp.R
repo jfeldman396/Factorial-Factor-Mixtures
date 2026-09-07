@@ -94,10 +94,29 @@ moderate_ifeval_like_block_sizes <- function(p, H, blend_to_balanced = 0.50) {
   integer_block_sizes_from_proportions(p, proportions)
 }
 
+ifeval_like_min_block_sizes <- function(p, H, min_block_size = 30L) {
+  # IFEval-like imbalance with guaranteed support for every factor.  We reserve
+  # min_block_size items per block, then distribute the remaining items using
+  # the IFEval-like proportions.
+  min_block_size <- as.integer(min_block_size)
+  if (H * min_block_size > p) {
+    stop(
+      "Cannot allocate at least ", min_block_size, " items to each of ", H,
+      " blocks when p = ", p, ".",
+      call. = FALSE
+    )
+  }
+  base <- rep(min_block_size, H)
+  remainder <- p - sum(base)
+  if (remainder == 0L) return(base)
+  base + integer_block_sizes_from_proportions(remainder, ifeval_like_block_proportions(H))
+}
+
 make_sample_size_block_sizes <- function(p, H, mode = "balanced") {
-  mode <- match.arg(mode, c("balanced", "ifeval_like", "moderate_ifeval_like"))
+  mode <- match.arg(mode, c("balanced", "ifeval_like", "moderate_ifeval_like", "ifeval_min30"))
   if (mode == "ifeval_like") return(ifeval_like_block_sizes(p, H))
   if (mode == "moderate_ifeval_like") return(moderate_ifeval_like_block_sizes(p, H))
+  if (mode == "ifeval_min30") return(ifeval_like_min_block_sizes(p, H, min_block_size = 30L))
   balanced_block_sizes(p, H)
 }
 
@@ -226,6 +245,43 @@ make_sample_size_loadings <- function(
 
   attr(Lambda, "loading_design") <- design
   list(Lambda = Lambda, block_id = block_id, block_sizes = block_sizes, loading_design = design)
+}
+
+subset_sample_size_loading_output <- function(
+    loading_out,
+    p,
+    H = ncol(loading_out$Lambda),
+    block_size_mode = "balanced") {
+  # Construct a nested p-item design from a larger master loading matrix.  Each
+  # smaller matrix keeps the first requested number of rows from every primary
+  # block, so p-growth changes item support without redrawing the DGP.
+  if (p > nrow(loading_out$Lambda)) {
+    stop("Requested p exceeds the number of rows in the master loading matrix.", call. = FALSE)
+  }
+  block_sizes <- make_sample_size_block_sizes(p, H, mode = block_size_mode)
+  rows <- unlist(lapply(seq_len(H), function(h) {
+    available <- which(loading_out$block_id == h)
+    if (length(available) < block_sizes[h]) {
+      stop(
+        "Master loading matrix does not contain enough rows for block ", h,
+        " under the requested nested p design.",
+        call. = FALSE
+      )
+    }
+    available[seq_len(block_sizes[h])]
+  }), use.names = FALSE)
+
+  Lambda <- loading_out$Lambda[rows, , drop = FALSE]
+  block_id <- sample_size_block_id(block_sizes)
+  attr(Lambda, "loading_design") <- loading_out$loading_design
+  list(
+    Lambda = Lambda,
+    block_id = block_id,
+    block_sizes = block_sizes,
+    loading_design = loading_out$loading_design,
+    master_rows = rows,
+    master_p = nrow(loading_out$Lambda)
+  )
 }
 
 make_sample_size_item_intercepts <- function(
