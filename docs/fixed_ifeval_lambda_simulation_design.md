@@ -127,6 +127,7 @@ From the repository root:
 ```bash
 Rscript scripts/sample_size/plot_fixed_ifeval_lambda_heatmaps.R
 Rscript scripts/sample_size/run_fixed_ifeval_lambda_simulation.R
+Rscript scripts/sample_size/plot_fixed_ifeval_lambda_progress.R
 ```
 
 For a short smoke run:
@@ -142,13 +143,28 @@ G_CONFIG_TYPES=all2 \
 Rscript scripts/sample_size/run_fixed_ifeval_lambda_simulation.R
 ```
 
-Main outputs:
+Main output root:
 
-- Raw results:
-  `results/full/fixed_ifeval_lambda_min30_u2_3_cp0_05_h5_h10/comparison_results.csv`
-- Chunk-level logs:
-  `results/full/fixed_ifeval_lambda_min30_u2_3_cp0_05_h5_h10/chunks/`
-- True loading heatmaps:
-  `results/selected_plots/sample_size/fixed_ifeval_lambda_min30_u2_3_cp0_05_h5_h10/true_lambda_heatmaps/`
-- True loading matrices:
-  `results/selected_tables/sample_size/fixed_ifeval_lambda_min30_u2_3_cp0_05_h5_h10/true_lambda/`
+```text
+results/full/fixed_ifeval_lambda_min30_u2_3_cp0_05_h5_h10/
+```
+
+Within that directory:
+
+- `comparison_results.csv`: combined raw results after phase checkpoints.
+- `chunks/`: chunk-level logs and checkpoint result files.
+
+Interim and final plots are written by:
+
+```text
+scripts/sample_size/plot_fixed_ifeval_lambda_progress.R
+```
+
+Deterministic DGP artifacts use the same run label:
+
+```text
+fixed_ifeval_lambda_min30_u2_3_cp0_05_h5_h10
+```
+
+- Heatmaps live under `results/selected_plots/sample_size/`.
+- Loading matrices live under `results/selected_tables/sample_size/`.

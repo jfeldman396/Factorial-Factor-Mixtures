@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 
-# Progress plots for the final signal-support simulation grid.
+# Progress plots for the fixed-DGP IFEval-like loading simulation grid.
 #
 # The script can be run while the simulation is still in progress.  It reads
 # the combined results file when available and otherwise collects per-task
@@ -38,8 +38,6 @@ rbind_fill <- function(x) {
 }
 
 collect_results <- function(results_dir) {
-  final <- file.path(results_dir, "comparison_results.csv")
-  if (file.exists(final)) return(read.csv(final, check.names = FALSE))
   chunk_dir <- file.path(results_dir, "chunks")
   task_dirs <- unique(dirname(list.files(
     chunk_dir,
@@ -47,7 +45,11 @@ collect_results <- function(results_dir) {
     recursive = TRUE,
     full.names = TRUE
   )))
-  if (!length(task_dirs)) return(data.frame())
+  if (!length(task_dirs)) {
+    final <- file.path(results_dir, "comparison_results.csv")
+    if (file.exists(final)) return(read.csv(final, check.names = FALSE))
+    return(data.frame())
+  }
   files <- vapply(task_dirs, function(d) {
     f <- file.path(d, "comparison_results.csv")
     c <- file.path(d, "comparison_results_checkpoint.csv")
@@ -222,7 +224,7 @@ plot_metric_boxplots <- function(d, metric, ylab, out_file, title) {
   invisible(TRUE)
 }
 
-run_label <- get_env("RUN_LABEL", "signal_support_grid_optimized_workers")
+run_label <- get_env("RUN_LABEL", "fixed_ifeval_lambda_min30_u2_3_cp0_05_h5_h10")
 results_dir <- get_env(
   "RESULTS_DIR",
   file.path(repo_root, "results", "full", run_label)
@@ -279,7 +281,7 @@ for (key in levels(setting_key)) {
     sep = "_"
   )
   title_base <- paste(
-    ifelse(base$block_size_mode == "ifeval_like", "Unbalanced", "Balanced"),
+    ifelse(base$block_size_mode %in% c("ifeval_like", "ifeval_min30"), "Unbalanced", "Balanced"),
     "blocks,",
     "strength", base$loading_strength,
     paste0("cross prob ", base$cross_loading_prob),
