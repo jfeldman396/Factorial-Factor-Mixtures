@@ -224,6 +224,189 @@ plot_metric_boxplots <- function(d, metric, ylab, out_file, title) {
   invisible(TRUE)
 }
 
+summarize_by_cell <- function(d, metrics) {
+  group_cols <- intersect(
+    c("method", "H_true", "G_true", "n", "p", "block_size_mode",
+      "loading_strength", "cross_loading_prob"),
+    names(d)
+  )
+  key <- do.call(interaction, c(
+    as.data.frame(lapply(d[, group_cols, drop = FALSE], as.character), stringsAsFactors = FALSE),
+    list(drop = TRUE, sep = "\r")
+  ))
+  pieces <- lapply(split(seq_len(nrow(d)), key), function(idx) {
+    sub <- d[idx, , drop = FALSE]
+    out <- sub[1L, group_cols, drop = FALSE]
+    out$n_result_rows <- nrow(sub)
+    for (metric in names(metrics)) {
+      if (!metric %in% names(sub)) next
+      values <- sub[[metric]]
+      values <- values[is.finite(values)]
+      out[[paste0(metric, "_mean")]] <- if (length(values)) mean(values) else NA_real_
+      out[[paste0(metric, "_sd")]] <- if (length(values) > 1L) sd(values) else NA_real_
+      out[[paste0(metric, "_n")]] <- length(values)
+    }
+    out
+  })
+  out <- rbind_fill(pieces)
+  out[order(out$method, out$H_true, out$G_true, out$n, out$p), , drop = FALSE]
+}
+
+make_vs_gibbs_table <- function(cell_summary, metrics) {
+  product_method <- "independent_marginal_mixture"
+  gibbs_methods <- intersect(c("viroli_laplace_gibbs", "viroli_gaussian_gibbs"), unique(cell_summary$method))
+  if (!length(gibbs_methods)) return(data.frame())
+
+  match_cols <- intersect(
+    c("H_true", "G_true", "n", "p", "block_size_mode", "loading_strength", "cross_loading_prob"),
+    names(cell_summary)
+  )
+  product <- cell_summary[cell_summary$method == product_method, , drop = FALSE]
+  out <- list()
+  for (gibbs_method in gibbs_methods) {
+    gibbs <- cell_summary[cell_summary$method == gibbs_method, , drop = FALSE]
+    if (!nrow(product) || !nrow(gibbs)) next
+    pkey <- do.call(paste, c(product[, match_cols, drop = FALSE], sep = "\r"))
+    gkey <- do.call(paste, c(gibbs[, match_cols, drop = FALSE], sep = "\r"))
+    common <- intersect(pkey, gkey)
+    if (!length(common)) next
+    for (key in common) {
+      prow <- product[pkey == key, , drop = FALSE][1L, , drop = FALSE]
+      grow <- gibbs[gkey == key, , drop = FALSE][1L, , drop = FALSE]
+      row <- prow[, match_cols, drop = FALSE]
+      row$gibbs_method <- gibbs_method
+      row$product_rows <- prow$n_result_rows
+      row$gibbs_rows <- grow$n_result_rows
+      for (metric in names(metrics)) {
+        mean_col <- paste0(metric, "_mean")
+        if (!mean_col %in% names(prow) || !mean_col %in% names(grow)) next
+        row[[paste0(metric, "_product")]] <- prow[[mean_col]]
+        row[[paste0(metric, "_gibbs")]] <- grow[[mean_col]]
+        row[[paste0(metric, "_product_minus_gibbs")]] <- prow[[mean_col]] - grow[[mean_col]]
+        if (metric == "seconds" && is.finite(prow[[mean_col]]) && prow[[mean_col]] > 0) {
+          row$seconds_gibbs_div_product <- grow[[mean_col]] / prow[[mean_col]]
+        }
+      }
+      out[[length(out) + 1L]] <- row
+    }
+  }
+  rbind_fill(out)
+}
+
+plot_across_p_recovery_panel <- function(d, metrics, out_file, title) {
+  keep_metrics <- intersect(
+    c("factor_score_rmse", "lambda_rmse", "alpha_rmse",
+      "marginal_mu_rmse", "marginal_var_rmse", "marginal_weight_rmse"),
+    names(metrics)
+  )
+  keep_metrics <- keep_metrics[keep_metrics %in% names(d)]
+  if (!length(keep_metrics)) return(invisible(FALSE))
+  d <- d[is.finite(d$p) & is.finite(d$n), , drop = FALSE]
+  if (!nrow(d)) return(invisible(FALSE))
+
+  colors <- c(
+    independent_marginal_mixture = "#2b6db6",
+    viroli_laplace_gibbs = "#cf2f34",
+    viroli_gaussian_gibbs = "#2f9b57"
+  )
+  methods <- intersect(names(colors), unique(as.character(d$method)))
+  methods <- c(methods, setdiff(unique(as.character(d$method)), methods))
+  n_values <- sort(unique(d$n))
+  line_types <- setNames(seq_along(n_values), as.character(n_values))
+  p_values <- sort(unique(d$p))
+
+  png(out_file, width = 2600, height = 1600, res = 170)
+  on.exit(dev.off(), add = TRUE)
+  layout(rbind(matrix(seq_len(6L), 2L, 3L, byrow = TRUE), rep(7L, 3L)), heights = c(1, 1, 0.16))
+  op <- par(mar = c(4.4, 4.9, 3, 1.2), oma = c(0, 0, 3.2, 0), xpd = FALSE)
+  on.exit(par(op), add = TRUE)
+  for (metric in keep_metrics) {
+    values <- d[[metric]]
+    ylim <- range(values[is.finite(values)], na.rm = TRUE)
+    if (!all(is.finite(ylim))) ylim <- c(0, 1)
+    if (ylim[1L] > 0) ylim[1L] <- 0
+    pad <- diff(ylim)
+    if (!is.finite(pad) || pad <= 0) pad <- max(abs(ylim), 1)
+    ylim[2L] <- ylim[2L] + 0.16 * pad
+    plot(
+      NA,
+      xlim = range(p_values),
+      ylim = ylim,
+      xlab = "p",
+      ylab = "RMSE",
+      main = metrics[[metric]],
+      xaxt = "n",
+      bty = "l"
+    )
+    axis(1, at = p_values)
+    grid(col = "#e6e6e6", lty = 3)
+    for (method in methods) {
+      for (n_value in n_values) {
+        sub <- d[d$method == method & d$n == n_value, , drop = FALSE]
+        sub <- sub[is.finite(sub[[metric]]), , drop = FALSE]
+        if (!nrow(sub)) next
+        means <- tapply(sub[[metric]], sub$p, mean, na.rm = TRUE)
+        sds <- tapply(sub[[metric]], sub$p, sd, na.rm = TRUE)
+        n_rep <- tapply(is.finite(sub[[metric]]), sub$p, sum)
+        agg <- data.frame(
+          p = as.numeric(names(means)),
+          mean = as.numeric(means),
+          sd = as.numeric(sds[names(means)]),
+          n_rep = as.integer(n_rep[names(means)])
+        )
+        agg <- agg[order(agg$p), , drop = FALSE]
+        col <- if (method %in% names(colors)) colors[[method]] else "#555555"
+        lty <- line_types[[as.character(n_value)]]
+        lines(agg$p, agg$mean, type = "b", pch = 19, lwd = 2.1, col = col, lty = lty)
+        if (any(agg$n_rep > 1L) && any(is.finite(agg$sd))) {
+          arrows(
+            agg$p,
+            agg$mean - 2 * agg$sd,
+            agg$p,
+            agg$mean + 2 * agg$sd,
+            angle = 90,
+            code = 3,
+            length = 0.035,
+            col = col,
+            lwd = 1.1
+          )
+        }
+      }
+    }
+  }
+  mtext(title, outer = TRUE, cex = 1.15, font = 2)
+  par(mar = c(0, 0, 0, 0), xpd = NA)
+  plot.new()
+  legend(
+    x = 0.5,
+    y = 0.68,
+    legend = method_label(methods),
+    col = colors[methods],
+    lty = 1,
+    pch = 19,
+    lwd = 2.5,
+    horiz = TRUE,
+    bty = "n",
+    cex = 1.0,
+    xjust = 0.5,
+    yjust = 0.5
+  )
+  legend(
+    x = 0.5,
+    y = 0.28,
+    legend = paste0("n=", n_values),
+    col = "#222222",
+    lty = line_types,
+    lwd = 2.5,
+    horiz = TRUE,
+    bty = "n",
+    cex = 1.0,
+    xjust = 0.5,
+    yjust = 0.5
+  )
+  invisible(TRUE)
+}
+
 run_label <- get_env("RUN_LABEL", "fixed_ifeval_lambda_min30_u2_3_cp0_05_h5_h10")
 results_dir <- get_env(
   "RESULTS_DIR",
@@ -268,6 +451,22 @@ metrics <- list(
   seconds = "seconds"
 )
 
+cell_summary <- summarize_by_cell(results, metrics)
+write.csv(
+  cell_summary,
+  file.path(table_dir, paste0(run_label, "_cell_summary.csv")),
+  row.names = FALSE
+)
+
+vs_gibbs <- make_vs_gibbs_table(cell_summary, metrics)
+if (nrow(vs_gibbs)) {
+  write.csv(
+    vs_gibbs,
+    file.path(table_dir, paste0(run_label, "_product_vs_gibbs_overlap.csv")),
+    row.names = FALSE
+  )
+}
+
 for (key in levels(setting_key)) {
   d <- results[setting_key == key, , drop = FALSE]
   if (!nrow(d)) next
@@ -287,6 +486,12 @@ for (key in levels(setting_key)) {
     paste0("cross prob ", base$cross_loading_prob),
     paste0("H=", base$H_true),
     paste0("G=", base$G_true)
+  )
+  plot_across_p_recovery_panel(
+    d,
+    metrics = metrics,
+    out_file = file.path(plot_dir, paste0("across_p_recovery_panel_", safe_token(setting_name), ".png")),
+    title = paste(title_base, "- recovery across p")
   )
   for (metric in names(metrics)) {
     if (!metric %in% names(d)) next
@@ -309,5 +514,13 @@ for (key in levels(setting_key)) {
 
 cat("Wrote completed-results table to:\n")
 cat(file.path(table_dir, paste0(run_label, "_completed_results.csv")), "\n")
+cat("Wrote cell summary table to:\n")
+cat(file.path(table_dir, paste0(run_label, "_cell_summary.csv")), "\n")
+if (nrow(vs_gibbs)) {
+  cat("Wrote Product MAP vs Gibbs overlap table to:\n")
+  cat(file.path(table_dir, paste0(run_label, "_product_vs_gibbs_overlap.csv")), "\n")
+} else {
+  cat("Product MAP vs Gibbs overlap table not written yet; no overlapping Gibbs rows found.\n")
+}
 cat("Wrote plots to:\n")
 cat(plot_dir, "\n")

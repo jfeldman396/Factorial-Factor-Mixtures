@@ -32,5 +32,6 @@ simulation study.
 - `plot_fixed_ifeval_lambda_heatmaps.R`: deterministic DGP visualization and
   Lambda table export.
 - `plot_fixed_ifeval_lambda_progress.R`: reads checkpoint files from a running
-  simulation and creates line/boxplot summaries.
-
+  simulation and creates line/boxplot summaries. It also writes a cell-level
+  summary table, a Product MAP versus Gibbs overlap table once Gibbs rows are
+  available, and fixed-`H,G` recovery panels showing how RMSE changes with `p`.
