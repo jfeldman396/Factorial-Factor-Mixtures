@@ -216,6 +216,7 @@ estimate_mixture_ica_riemannian <- function(
     G_fixed,
     n_random_starts = 1L,
     n_ica_starts = 0L,
+    include_identity_start = TRUE,
     ica_functions = c("logcosh", "exp"),
     ica_max_iter = 200L,
     ica_tol = 1e-4,
@@ -259,7 +260,8 @@ estimate_mixture_ica_riemannian <- function(
   }
   rotation_loading_l1_penalty <- max(0, as.numeric(rotation_loading_l1_penalty))
 
-  starts <- list(identity = diag(H))
+  starts <- list()
+  if (isTRUE(include_identity_start)) starts$identity <- diag(H)
   ica_starts <- fastica_rotation_starts(
     S = S,
     n_starts = n_ica_starts,
@@ -273,6 +275,7 @@ estimate_mixture_ica_riemannian <- function(
   for (s in seq_len(max(0L, as.integer(n_random_starts)))) {
     starts[[paste0("random_", s)]] <- random_orthogonal(H)
   }
+  if (!length(starts)) starts$identity <- diag(H)
 
   fit_one_start <- function(start_index, use_parallel_mixtures = FALSE) {
     set.seed(seed + 100L * start_index)

@@ -1,0 +1,3 @@
+"method","lambda_rmse","lambda_corr","mean_factor_abs_cor","factor_score_rmse","probability_rmse","seconds","marginal_mu_rmse","marginal_var_rmse","marginal_weight_rmse","n","p","H","G","rep","lasso_penalty","product_pretraining_converged","product_rotation_converged","product_refinement_converged"
+"Product MAP",0.338431528069948,0.984467142124995,0.992197702601862,0.124605665289726,0.057417929965117,9.019,0.07427248581255,0.0565311533136723,0.0458236582556133,200,500,5,"3-3-3-3-3",1,5,FALSE,TRUE,TRUE
+"Viroli Laplace",0.272152065239946,0.979136058197598,0.988763482346578,0.149534845873164,0.0614886460194307,90.025,0.214093854890731,0.208115150318854,0.0858111782372791,200,500,5,"3-3-3-3-3",1,5,FALSE,TRUE,TRUE

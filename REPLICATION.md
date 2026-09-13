@@ -193,61 +193,76 @@ ability profiles by factor.
 
 ## Sample-Size Simulation
 
-The current final simulation asks when the first-stage binary signal/subspace
-estimate is accurate enough for rotation and MAP refinement.  The design and
-algorithms are summarized in:
+The current paper-facing simulation is the fixed-DGP IFEval-like Lambda
+simulation.  It asks whether Product MAP can recover latent factors and model
+parameters competitively with Viroli-style probit Gibbs samplers when the item
+loading structure resembles the IFEval analysis.
 
 ```text
-writeup/final_simulation_design/final_simulation_design_algorithms.pdf
+docs/fixed_ifeval_lambda_simulation_design.md
+docs/fixed_ifeval_lambda_simulation_design.pdf
 ```
 
-Run the launcher from the repository root:
+Run or resume the full simulation from the repository root:
 
 ```sh
-Rscript scripts/sample_size/run_final_product_viroli_simulation.R
+Rscript scripts/sample_size/run_fixed_ifeval_lambda_simulation.R
 ```
 
 By default this runs:
 
-- `n in {100, 200}`;
-- `p in {500, 1000, 1500, 2000}` for product MAP;
+- `n in {100, 200, 400}`;
+- `p in {500, 1000, 1500, 2000}` for Product MAP;
 - `p in {500, 1000}` for the Viroli baselines;
-- `H in {5, 10, 15, 20}`;
-- `G in {2, 3}`, expanded to equal component counts across factors;
-- separation `1`;
-- loading magnitudes `Uniform(1.25, 1.75)` and `Uniform(2.50, 3.00)`;
-- cross-loading probabilities `0.075` and `0.20`;
-- randomly signed cross-loadings;
-- balanced and IFEval-like unbalanced item blocks;
-- 25 Monte Carlo repetitions per setting;
+- `H in {5, 10}`;
+- `G_h = 2` for every factor, or `G_h = 3` for every factor;
+- separation `2`;
+- IFEval-like unbalanced item blocks, with at least 30 primary items in the
+  smallest block;
+- nonzero loading magnitudes sampled from `Uniform(2, 3)`;
+- cross-loading probability `0.05`;
+- randomly signed cross-loadings and block-level primary-loading signs;
+- 25 Monte Carlo replications per setting;
 - item intercepts using the IFEval-like intercept design;
 - loading-based sign/permutation alignment for all recovery metrics;
-- Product MAP with EM-SVD likelihood pretraining, sparse rotation, and MAP
+- Product MAP with EM-SVD likelihood pretraining, Riemannian rotation, and MAP
   refinement;
-- Viroli Gibbs with a Laplace loading prior and penalty 10;
+- Viroli Gibbs with a Laplace loading prior using the same n-dependent loading
+  penalty schedule as Product MAP;
 - Viroli Gibbs with a diffuse Gaussian loading prior.
 
 The main output folder is:
 
 ```text
-results/full/signal_support_grid
+results/full/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10
 ```
 
 The run is resumable at the task-chunk level.  Each chunk writes its own
 `comparison_results_checkpoint.csv` under
-`results/full/signal_support_grid/chunks`.  The launcher combines completed
-chunks into:
+`results/full/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10/chunks`.
+The launcher combines completed chunks into:
 
 ```text
-results/full/signal_support_grid/comparison_results.csv
-results/full/signal_support_grid/comparison_summary.csv
+results/full/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10/comparison_results.csv
 ```
 
-These full outputs are ignored by git because they can become large.  The
-checkpoint records the full DGP setting, penalties, mixture priors,
-convergence diagnostics, elapsed seconds, Gibbs ESS summaries, item-prevalence
-diagnostics, loading support diagnostics, and product-MAP first-stage
-signal/subspace diagnostics.
+The completed main run has 2400 result rows: 1200 Product MAP rows, 600 Viroli
+Laplace Gibbs rows, and 600 Viroli Gaussian Gibbs rows.  Full outputs under
+`results/full/` are ignored by git because they contain logs and chunk-level
+artifacts.  Selected CSV snapshots and plots are committed under
+`results/selected_tables/sample_size/` and
+`results/selected_plots/sample_size/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10/`.
+
+The default penalty schedule is:
+
+```text
+LAMBDA_L1_PENALTY_BY_N=100=5,200=5,400=8
+```
+
+For Product MAP this sets `PRETRAIN_LOADING_PENALTY`,
+`ROTATION_LOADING_L1_PENALTY`, and `LAMBDA_L1_PENALTY`.  For Viroli Laplace it
+sets `VIROLI_LAMBDA_L1_PENALTY`.  Viroli Gaussian sets the Laplace penalty to
+zero.
 
 ### Final Simulation Smoke Tests
 
@@ -256,39 +271,32 @@ For a fast Product MAP code-path check:
 ```sh
 N_VALUES=20 \
 P_VALUES_PRODUCT=40 \
-P_VALUES_GIBBS=99999 \
+P_VALUES_GIBBS=40 \
 H_VALUES=2 \
-G_VALUES=2 \
-LOADING_STRENGTHS=weak \
-CROSS_LOADING_PROBS=0.075 \
-BLOCK_SIZE_MODES=balanced \
+G_CONFIG_TYPES=all2 \
 REP_VALUES=1 \
 TASK_WORKERS_PRODUCT=1 \
 PRODUCT_INTERNAL_WORKERS=2 \
-RUN_LABEL=signal_support_grid_smoke \
-Rscript scripts/sample_size/run_final_product_viroli_simulation.R
-```
-
-To smoke-test all three method paths, use a tiny Gibbs run:
-
-```sh
-N_VALUES=12 \
-P_VALUES_PRODUCT=20 \
-P_VALUES_GIBBS=20 \
-H_VALUES=2 \
-G_VALUES=2 \
-LOADING_STRENGTHS=weak \
-CROSS_LOADING_PROBS=0.075 \
-BLOCK_SIZE_MODES=balanced \
-REP_VALUES=1 \
-TASK_WORKERS_PRODUCT=1 \
-PRODUCT_INTERNAL_WORKERS=2 \
-TASK_WORKERS_GIBBS=2 \
 VIROLI_ITER=6 \
 VIROLI_BURN=3 \
 VIROLI_COMPUTE_PARAMETER_ESS=FALSE \
-RUN_LABEL=signal_support_grid_smoke_gibbs \
-Rscript scripts/sample_size/run_final_product_viroli_simulation.R
+RUN_LABEL=fixed_ifeval_lambda_smoke \
+Rscript scripts/sample_size/run_fixed_ifeval_lambda_simulation.R
+```
+
+To smoke-test only Product MAP, disable Gibbs by giving an empty Gibbs grid:
+
+```sh
+N_VALUES=20 \
+P_VALUES_PRODUCT=40 \
+P_VALUES_GIBBS= \
+H_VALUES=2 \
+G_CONFIG_TYPES=all2 \
+REP_VALUES=1 \
+TASK_WORKERS_PRODUCT=1 \
+PRODUCT_INTERNAL_WORKERS=2 \
+RUN_LABEL=fixed_ifeval_lambda_smoke_product_only \
+Rscript scripts/sample_size/run_fixed_ifeval_lambda_simulation.R
 ```
 
 These smoke tests only verify code paths.  They are not scientific simulations.
@@ -309,55 +317,71 @@ Within Product MAP, internal workers are used for independent marginal mixture
 fits, itemwise loading regressions, and subject-wise factor-score updates.
 The outer EM-SVD, rotation, and refinement sweeps remain sequential.
 
-For Viroli Gibbs, the default is six independent task chunks at a time and one
-internal Gibbs worker per chunk:
+For Viroli Gibbs, the current launcher runs one task chunk at a time and uses
+four internal workers inside each Gibbs fit:
 
 ```text
-TASK_WORKERS_GIBBS=6
-GIBBS_INTERNAL_WORKERS=1
+TASK_WORKERS_GIBBS=1
+GIBBS_INTERNAL_WORKERS_SERIAL=4
+GIBBS_INTERNAL_WORKERS_PARALLEL=4
 ```
 
-This parallelizes Gibbs across independent replications/configurations, which
-is usually more efficient than trying to parallelize every MCMC transition
-inside a single chain.  Increase `TASK_WORKERS_GIBBS` if memory permits.
+This keeps replication scheduling simple while still parallelizing the
+computationally heavy Gibbs conditionals where the implementation supports it.
 
 ### Regenerate Simulation Figures
 
-Representative DGP heatmaps for the final loading designs:
+Representative DGP heatmaps for the fixed IFEval-like loading design:
 
 ```sh
-Rscript scripts/sample_size/plot_dgp_loading_heatmaps.R
+Rscript scripts/sample_size/plot_fixed_ifeval_lambda_heatmaps.R
 ```
 
 This writes PNG heatmaps to:
 
 ```text
-results/selected_plots/sample_size/signal_support_grid/dgp_heatmaps
+results/selected_plots/sample_size/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10/true_lambda_heatmaps
 ```
 
 and matching loading matrices to:
 
 ```text
-results/selected_tables/sample_size/signal_support_grid_dgp
+results/selected_tables/sample_size/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10/true_lambda
 ```
 
 Progress plots from completed chunks:
 
 ```sh
-Rscript scripts/sample_size/plot_signal_support_simulation_progress.R
+RUN_LABEL=fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10 \
+Rscript scripts/sample_size/plot_fixed_ifeval_lambda_progress.R
 ```
 
-This reads `results/full/signal_support_grid`, writes a completed-results
+This reads the corresponding `results/full/` directory, writes a completed-results
 snapshot to:
 
 ```text
-results/selected_tables/sample_size/signal_support_grid_completed_results.csv
+results/selected_tables/sample_size/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10_completed_results.csv
 ```
 
 and writes line/boxplot summaries under:
 
 ```text
-results/selected_plots/sample_size/signal_support_grid
+results/selected_plots/sample_size/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10
+```
+
+To regenerate an example loading-recovery panel for one cell:
+
+```sh
+N_VALUE=200 P_VALUE=500 H_TRUE=5 G_TRUE=3 REP_VALUE=1 \
+LASSO_PENALTY=5 SEPARATIONS=2 \
+Rscript scripts/sample_size/plot_example_lambda_recovery.R
+```
+
+This writes true/Product MAP/Viroli Laplace loading heatmaps, factor-score
+scatter panels, fitted factor-marginal overlays, and aligned matrices under:
+
+```text
+results/selected_plots/sample_size/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10/lambda_recovery_examples
 ```
 
 ### Interpret Simulation Metrics
@@ -379,8 +403,9 @@ Important fields:
 - `stage1_sinTheta_op`: operator-norm subspace angle error for the first-stage
   signal estimate.
 - `seconds`: wall-clock runtime for the method in that repetition.
-- `ess_min`, `ess_median`, `ess_mean`: Gibbs effective sample size summaries
-  when ESS calculation is enabled.
+- `gibbs_min_parameter_ess`, `gibbs_median_parameter_ess`,
+  `gibbs_mean_parameter_ess`: Gibbs effective sample size summaries when ESS
+  calculation is enabled.
 
 The DGP columns `dgp_min_total_nonzero_loadings_by_factor`,
 `dgp_mean_cross_loadings_per_item`, `dgp_min_loading_l2_by_factor`, and related
@@ -390,15 +415,15 @@ fields connect recovery to effective signal strength and loading support.
 
 Selected outputs are committed for immediate inspection:
 
-- final simulation DGP heatmaps:
-  `results/selected_plots/sample_size/signal_support_grid/dgp_heatmaps`;
-- final simulation representative Lambda matrices:
-  `results/selected_tables/sample_size/signal_support_grid_dgp`;
+- fixed IFEval-like simulation DGP heatmaps and recovery plots:
+  `results/selected_plots/sample_size/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10`;
+- fixed IFEval-like simulation summary CSV snapshots:
+  `results/selected_tables/sample_size/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10_*.csv`;
 - IFEval plots: `results/selected_plots/ifeval`;
 - IFEval tables: `results/selected_tables/ifeval`;
 - IFEval writeup: `writeup/ifeval_componentwise_G3313.pdf`;
 - simulation design writeup:
-  `writeup/final_simulation_design/final_simulation_design_algorithms.pdf`.
+  `docs/fixed_ifeval_lambda_simulation_design.pdf`.
 
 The latest static audit notes are in `CODE_AUDIT.md`. They record which R files
 were parsed, which input files were checked, which PDF was rendered, and which

@@ -15,27 +15,34 @@ static audit notes and reproducibility caveats.
 
 ## Current Simulation
 
-The active sample-size experiment uses:
+The paper-facing sample-size experiment is the fixed-DGP IFEval-like Lambda
+simulation.  It holds the population loading matrix, mixture parameters, and
+intercept design fixed within each design cell, then simulates new binary
+datasets across replications.
 
-- `n in {100, 200}`
-- `p in {500, 1000, 1500, 2000}` for product MAP
-- `p in {500, 1000}` for the Viroli Gibbs baselines
-- `H in {5, 10, 15, 20}`
-- `G in {2, 3}`, applied to every factor coordinate
-- `25` Monte Carlo repetitions per setting
-- Cross/IFEval-like loadings with randomly signed cross-loadings
-- loading magnitudes `Uniform(1.25, 1.75)` or `Uniform(2.50, 3.00)`
-- cross-loading probability `0.075` or `0.20`
-- balanced and IFEval-like unbalanced item blocks
-- item intercepts generated in an IFEval-like pattern
-- product MAP with EM-SVD probit signal pretraining, sparse rotation, and MAP refinement
-- Viroli-style probit Gibbs with either a Laplace loading prior or a diffuse Gaussian loading prior
+The current grid uses:
 
-The launcher is
-`scripts/sample_size/run_final_product_viroli_simulation.R`.  The raw full
-outputs are written to `results/full/signal_support_grid` and are ignored by
-git.  Selected design heatmaps, progress plots, and summary CSVs are stored in
-`results/selected_plots/sample_size` and `results/selected_tables/sample_size`.
+- `n in {100, 200, 400}`;
+- `p in {500, 1000, 1500, 2000}` for Product MAP;
+- `p in {500, 1000}` for the Viroli Gibbs baselines;
+- `H in {5, 10}`;
+- `G_h = 2` for every factor, or `G_h = 3` for every factor;
+- `25` Monte Carlo replications per design cell;
+- IFEval-like unbalanced primary blocks, with at least `30` primary items in
+  the smallest block;
+- primary and cross-loading magnitudes sampled from `Uniform(2, 3)`;
+- randomly signed cross-loadings with probability `0.05`;
+- mixture separation `2`;
+- Product MAP loading penalties `5` for `n = 100, 200` and `8` for `n = 400`;
+- Viroli Laplace Gibbs using the same n-dependent loading penalty schedule;
+- Viroli Gaussian Gibbs with a diffuse Gaussian loading prior.
+
+The launcher is `scripts/sample_size/run_fixed_ifeval_lambda_simulation.R`.
+The raw full outputs are written to
+`results/full/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10`
+and are ignored by git.  Selected plots and CSV snapshots are committed under
+`results/selected_plots/sample_size/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10`
+and `results/selected_tables/sample_size`.
 
 ## IFEval Analysis
 

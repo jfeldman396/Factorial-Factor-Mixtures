@@ -32,11 +32,11 @@ f_ih ~ sum_g pi_hg N(mu_hg, sigma_hg^2)
 ```
 
 The mixture parameters are generated with `MIXTURE_PARAM_MODE=viroli_smoke`.
-For `sep = 1`, the raw component parameters are:
+For `sep = 2`, the raw component parameters are:
 
-- `G_h = 2`: weights `(0.5, 0.5)`, means `(-1, 1)`, sds `(0.55, 0.85)`.
+- `G_h = 2`: weights `(0.5, 0.5)`, means `(-2, 2)`, sds `(0.55, 0.85)`.
 - `G_h = 3`: weights `(0.3, 0.4, 0.3)`, means `(-1.35, 0, 1.35)`,
-  sds `(0.45, 0.65, 0.45)`.
+  multiplied by `2`, and sds `(0.45, 0.65, 0.45)`.
 
 Each factor coordinate is then standardized before generating responses, so the
 latent factor scale is comparable across settings.
@@ -82,7 +82,8 @@ Three methods are compared.
 
 2. Viroli Laplace Gibbs:
    - Probit-augmented independent-mixture Gibbs sampler.
-   - Laplace loading prior with penalty 10.
+   - Laplace loading prior using the same n-dependent penalty schedule as
+     Product MAP: `5` for `n = 100, 200` and `8` for `n = 400`.
    - Uses 4 internal workers.
    - Run for 2000 iterations with 1000 burn-in draws.
 
@@ -130,6 +131,10 @@ Rscript scripts/sample_size/run_fixed_ifeval_lambda_simulation.R
 Rscript scripts/sample_size/plot_fixed_ifeval_lambda_progress.R
 ```
 
+The default run is intentionally resumable.  Existing task chunks are skipped,
+so rerunning the launcher continues from the last completed chunk rather than
+restarting the grid.
+
 For a short smoke run:
 
 ```bash
@@ -139,20 +144,27 @@ P_VALUES_PRODUCT=500 \
 P_VALUES_GIBBS=500 \
 H_VALUES=5 \
 G_CONFIG_TYPES=all2 \
-  RUN_LABEL=fixed_ifeval_lambda_min30_u2_3_cp0_05_h5_h10_smoke \
+  RUN_LABEL=fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10_smoke \
 Rscript scripts/sample_size/run_fixed_ifeval_lambda_simulation.R
 ```
 
 Main output root:
 
 ```text
-results/full/fixed_ifeval_lambda_min30_u2_3_cp0_05_h5_h10/
+results/full/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10/
 ```
 
 Within that directory:
 
 - `comparison_results.csv`: combined raw results after phase checkpoints.
 - `chunks/`: chunk-level logs and checkpoint result files.
+- `task_status_*.csv`: completion status for each launcher phase.
+
+The completed main run contains `2400` result rows:
+
+- `1200` Product MAP rows;
+- `600` Viroli Laplace Gibbs rows;
+- `600` Viroli Gaussian Gibbs rows.
 
 Interim and final plots are written by:
 
@@ -160,11 +172,31 @@ Interim and final plots are written by:
 scripts/sample_size/plot_fixed_ifeval_lambda_progress.R
 ```
 
+Single-cell loading-recovery examples are written by:
+
+```text
+scripts/sample_size/plot_example_lambda_recovery.R
+```
+
 Deterministic DGP artifacts use the same run label:
 
 ```text
-fixed_ifeval_lambda_min30_u2_3_cp0_05_h5_h10
+fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10
 ```
 
-- Heatmaps live under `results/selected_plots/sample_size/`.
-- Loading matrices live under `results/selected_tables/sample_size/`.
+- Selected heatmaps and recovery plots live under:
+
+```text
+results/selected_plots/sample_size/
+  fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10/
+```
+
+- Selected summary CSVs live under the following directory, with the same
+  run-label prefix:
+
+```text
+results/selected_tables/sample_size/
+```
+
+- Full raw outputs under `results/full/` are intentionally ignored by git
+  because they contain large chunk-level logs and checkpoint files.

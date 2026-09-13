@@ -299,6 +299,191 @@ make_vs_gibbs_table <- function(cell_summary, metrics) {
   rbind_fill(out)
 }
 
+matched_method_rows <- function(results, product_method, comparator_method, metrics) {
+  if (!"method" %in% names(results)) return(data.frame())
+  product <- results[as.character(results$method) == product_method, , drop = FALSE]
+  comparator <- results[as.character(results$method) == comparator_method, , drop = FALSE]
+  if (!nrow(product) || !nrow(comparator)) return(data.frame())
+
+  candidate_match_cols <- c(
+    "scenario", "rep", "n", "p", "H_true", "G_true", "G_config",
+    "separation", "mixture_param_mode", "mixture_variance_mode",
+    "intercept_mode", "loading_design", "block_size_mode",
+    "loading_sign_mode", "alignment_mode", "loading_strength",
+    "primary_loading_min", "primary_loading_max",
+    "cross_loading_min", "cross_loading_max",
+    "cross_loading_prob", "cross_sign_mode",
+    "fix_dgp_parameters", "dgp_parameter_seed", "loading_parameter_seed",
+    "mixture_parameter_seed", "data_seed", "dgp_p_max"
+  )
+  match_cols <- intersect(candidate_match_cols, names(results))
+  metric_cols <- intersect(names(metrics), names(results))
+  if (!length(match_cols) || !length(metric_cols)) return(data.frame())
+
+  make_key <- function(d) {
+    parts <- lapply(d[, match_cols, drop = FALSE], function(x) {
+      x <- as.character(x)
+      x[is.na(x)] <- "<NA>"
+      x
+    })
+    do.call(paste, c(parts, sep = "\r"))
+  }
+
+  product$.match_key <- make_key(product)
+  comparator$.match_key <- make_key(comparator)
+  common <- intersect(unique(product$.match_key), unique(comparator$.match_key))
+  if (!length(common)) return(data.frame())
+
+  out <- vector("list", length(common))
+  for (i in seq_along(common)) {
+    key <- common[[i]]
+    prow <- product[product$.match_key == key, , drop = FALSE][1L, , drop = FALSE]
+    crow <- comparator[comparator$.match_key == key, , drop = FALSE][1L, , drop = FALSE]
+    row <- prow[, match_cols, drop = FALSE]
+    row$product_method <- product_method
+    row$comparator_method <- comparator_method
+    for (metric in metric_cols) {
+      row[[paste0(metric, "_product")]] <- prow[[metric]]
+      row[[paste0(metric, "_comparator")]] <- crow[[metric]]
+      row[[paste0(metric, "_product_minus_comparator")]] <- prow[[metric]] - crow[[metric]]
+    }
+    out[[i]] <- row
+  }
+  rbind_fill(out)
+}
+
+plot_matched_product_vs_viroli_laplace <- function(results, metrics, out_file, table_file = NULL) {
+  matched <- matched_method_rows(
+    results = results,
+    product_method = "independent_marginal_mixture",
+    comparator_method = "viroli_laplace_gibbs",
+    metrics = metrics
+  )
+  if (!nrow(matched)) return(invisible(FALSE))
+  if (!is.null(table_file)) write.csv(matched, table_file, row.names = FALSE)
+
+  plot_metrics <- c(
+    factor_score_rmse = "factor score RMSE",
+    lambda_rmse = "loading RMSE",
+    alpha_rmse = "intercept RMSE",
+    marginal_mu_rmse = "mixture mean RMSE",
+    marginal_var_rmse = "mixture variance RMSE",
+    marginal_weight_rmse = "mixture weight RMSE",
+    seconds = "runtime seconds"
+  )
+  plot_metrics <- plot_metrics[
+    paste0(names(plot_metrics), "_product") %in% names(matched) &
+      paste0(names(plot_metrics), "_comparator") %in% names(matched)
+  ]
+  if (!length(plot_metrics)) return(invisible(FALSE))
+
+  h_col <- intersect(c("H_true", "H"), names(matched))[1L]
+  p_col <- intersect(c("p", "P"), names(matched))[1L]
+  n_col <- intersect(c("n", "N"), names(matched))[1L]
+  if (is.na(h_col) || is.na(p_col) || is.na(n_col)) return(invisible(FALSE))
+
+  h_values <- sort(unique(matched[[h_col]][is.finite(matched[[h_col]])]))
+  p_values <- sort(unique(matched[[p_col]][is.finite(matched[[p_col]])]))
+  n_values <- sort(unique(matched[[n_col]][is.finite(matched[[n_col]])]))
+  h_colors <- setNames(
+    rep_len(c("#2b6db6", "#cf2f34", "#2f9b57", "#7b4cc2", "#d99019"), length(h_values)),
+    as.character(h_values)
+  )
+  p_shapes <- setNames(rep_len(c(16, 17, 15, 18, 8, 3), length(p_values)), as.character(p_values))
+
+  size_for_n <- function(x) {
+    x <- as.numeric(x)
+    if (length(n_values) <= 1L || diff(range(n_values)) <= 0) return(rep(1.05, length(x)))
+    0.65 + 1.15 * (x - min(n_values)) / diff(range(n_values))
+  }
+
+  png(out_file, width = 2400, height = 1500, res = 170)
+  on.exit(dev.off(), add = TRUE)
+  layout(
+    matrix(c(1, 2, 3, 4, 5, 6, 7, 8), nrow = 2L, byrow = TRUE),
+    widths = c(1, 1, 1, 1.02)
+  )
+  op <- par(mar = c(4.7, 4.9, 3.0, 1.1), oma = c(0, 0, 3.1, 0), xpd = FALSE)
+  on.exit(par(op), add = TRUE)
+
+  for (metric in names(plot_metrics)) {
+    x <- matched[[paste0(metric, "_product")]]
+    y <- matched[[paste0(metric, "_comparator")]]
+    ok <- is.finite(x) & is.finite(y)
+    if (!any(ok)) {
+      plot.new()
+      next
+    }
+    lim <- range(c(x[ok], y[ok]), na.rm = TRUE)
+    pad <- diff(lim)
+    if (!is.finite(pad) || pad <= 0) pad <- max(abs(lim), 1)
+    lim <- lim + c(-0.08, 0.08) * pad
+    if (lim[1L] > 0) lim[1L] <- max(0, lim[1L])
+
+    plot(
+      NA,
+      xlim = lim,
+      ylim = lim,
+      xlab = "Product MAP",
+      ylab = "Viroli Laplace",
+      main = unname(plot_metrics[[metric]]),
+      bty = "l"
+    )
+    grid(col = "#e6e6e6", lty = 3)
+    abline(0, 1, col = "#777777", lty = 2, lwd = 1.3)
+    for (i in which(ok)) {
+      h_key <- as.character(matched[[h_col]][i])
+      p_key <- as.character(matched[[p_col]][i])
+      points(
+        x[i],
+        y[i],
+        pch = p_shapes[[p_key]],
+        cex = size_for_n(matched[[n_col]][i]),
+        col = adjustcolor(h_colors[[h_key]], alpha.f = 0.48),
+        bg = adjustcolor(h_colors[[h_key]], alpha.f = 0.48)
+      )
+    }
+  }
+
+  par(mar = c(0, 0, 0, 0), xpd = NA)
+  plot.new()
+  legend(
+    "center",
+    legend = c(paste0("H=", h_values), paste0("p=", p_values), paste0("n=", n_values), "diagonal"),
+    col = c(
+      h_colors[as.character(h_values)],
+      rep("#111111", length(p_values)),
+      rep("#555555", length(n_values)),
+      "#777777"
+    ),
+    pch = c(
+      rep(16, length(h_values)),
+      p_shapes[as.character(p_values)],
+      rep(16, length(n_values)),
+      NA
+    ),
+    pt.cex = c(
+      rep(1.2, length(h_values)),
+      rep(1.2, length(p_values)),
+      size_for_n(n_values),
+      NA
+    ),
+    lty = c(
+      rep(NA, length(h_values) + length(p_values) + length(n_values)),
+      2
+    ),
+    lwd = c(
+      rep(NA, length(h_values) + length(p_values) + length(n_values)),
+      1.6
+    ),
+    bty = "n",
+    cex = 1.0,
+    y.intersp = 1.25
+  )
+  mtext("Matched-rep Product MAP vs Viroli Laplace Gibbs comparisons", outer = TRUE, cex = 1.25, font = 2)
+  invisible(TRUE)
+}
+
 plot_across_p_recovery_panel <- function(d, metrics, out_file, title) {
   keep_metrics <- intersect(
     c("factor_score_rmse", "lambda_rmse", "alpha_rmse",
@@ -413,7 +598,7 @@ plot_across_p_recovery_panel <- function(d, metrics, out_file, title) {
   invisible(TRUE)
 }
 
-run_label <- get_env("RUN_LABEL", "fixed_ifeval_lambda_min30_u2_3_cp0_05_h5_h10")
+run_label <- get_env("RUN_LABEL", "fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10")
 results_dir <- get_env(
   "RESULTS_DIR",
   file.path(repo_root, "results", "full", run_label)
@@ -484,6 +669,13 @@ if (nrow(vs_gibbs)) {
     row.names = FALSE
   )
 }
+
+plot_matched_product_vs_viroli_laplace(
+  results = results,
+  metrics = metrics,
+  out_file = file.path(plot_dir, paste0(output_prefix, "matched_product_vs_viroli_laplace_scatter.png")),
+  table_file = file.path(table_dir, paste0(run_label, "_", output_prefix, "product_vs_viroli_laplace_matched_reps.csv"))
+)
 
 for (key in levels(setting_key)) {
   d <- results[setting_key == key, , drop = FALSE]

@@ -3,6 +3,12 @@
 This folder contains the runnable scripts for the fixed-DGP IFEval-like
 simulation study.
 
+The current paper-facing run label is:
+
+```text
+fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10
+```
+
 ## Canonical Workflow
 
 1. Generate the true loading matrices and heatmaps:
@@ -17,6 +23,12 @@ simulation study.
    Rscript scripts/sample_size/run_fixed_ifeval_lambda_simulation.R
    ```
 
+   The default grid is `n = 100, 200, 400`, Product MAP `p = 500, 1000,
+   1500, 2000`, Gibbs `p = 500, 1000`, `H = 5, 10`, all-2/all-3 marginal
+   component counts, 25 replications, IFEval-like block sizes with at least
+   30 items in the smallest block, `Uniform(2, 3)` nonzero loadings,
+   cross-loading probability `0.05`, and mixture separation `2`.
+
 3. Plot interim or final results from the chunk checkpoints:
 
    ```bash
@@ -28,8 +40,17 @@ simulation study.
    ```bash
    METHOD_FILTER=independent_marginal_mixture \
    OUTPUT_TAG=product_map_only \
-   PLOT_DIR=results/selected_plots/sample_size/fixed_ifeval_lambda_min30_u2_3_cp0_05_h5_h10/product_map_only \
+   PLOT_DIR=results/selected_plots/sample_size/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10/product_map_only \
    Rscript scripts/sample_size/plot_fixed_ifeval_lambda_progress.R
+   ```
+
+4. Recreate an example true/estimated Lambda recovery panel, factor-score
+   scatter panel, and fitted marginal-mixture panel for one design cell:
+
+   ```bash
+   N_VALUE=200 P_VALUE=500 H_TRUE=5 G_TRUE=3 REP_VALUE=1 \
+   LASSO_PENALTY=5 SEPARATIONS=2 \
+   Rscript scripts/sample_size/plot_example_lambda_recovery.R
    ```
 
 ## Script Roles
@@ -43,4 +64,8 @@ simulation study.
 - `plot_fixed_ifeval_lambda_progress.R`: reads checkpoint files from a running
   simulation and creates line/boxplot summaries. It also writes a cell-level
   summary table, a Product MAP versus Gibbs overlap table once Gibbs rows are
-  available, and fixed-`H,G` recovery panels showing how RMSE changes with `p`.
+  available, a matched Product MAP versus Viroli Laplace scatter plot, and
+  fixed-`H,G` recovery panels showing how RMSE changes with `p`.
+- `plot_example_lambda_recovery.R`: recreates one simulation cell and writes
+  side-by-side true/Product MAP/Viroli Laplace heatmaps, aligned factor-score
+  plots, and fitted marginal-mixture overlays.

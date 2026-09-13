@@ -22,16 +22,25 @@ F_ih ~ sum_g pi_hg N(mu_hg, sigma_hg^2),
 h = 1, ..., H.
 ```
 
-Unless otherwise stated, each simulated data set redraws factor scores, mixture
-class labels, item loadings, intercepts, and probit noise from the specified
-DGP using the scenario seed.
+Unless otherwise stated, each replication redraws factor scores, mixture class
+labels, probit noise, and binary responses from the specified DGP using the
+scenario seed.  The current fixed IFEval-like main simulation instead holds
+the loading matrix, mixture parameters, and intercept design fixed within each
+design cell, then redraws the latent sample and binary responses across
+replications.
 
 ## Main Experimental Knobs
 
-The main simulation driver is:
+The shared low-level simulation engine is:
 
 ```text
 scripts/sample_size/compare_original_simulation_joint_mfa_gibbs.R
+```
+
+The current paper-facing launcher that sets the main grid is:
+
+```text
+scripts/sample_size/run_fixed_ifeval_lambda_simulation.R
 ```
 
 Canonical DGP utilities live in:
@@ -249,59 +258,97 @@ the stricter setting used in the current final simulation.  It is
 the better diagnostic when the question is whether the whole parameterization is
 coherently recovered.
 
-## Final Product/Viroli Simulation Grid
+## Fixed IFEval-Like Main Simulation Grid
 
 The current paper-facing launcher is:
 
 ```text
-scripts/sample_size/run_final_product_viroli_simulation.R
+scripts/sample_size/run_fixed_ifeval_lambda_simulation.R
+```
+
+The canonical run label is:
+
+```text
+fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10
 ```
 
 Default design:
 
 ```text
-n = 100, 200
-p = 500, 1000, 1500, 2000 for product MAP
+n = 100, 200, 400
+p = 500, 1000, 1500, 2000 for Product MAP
 p = 500, 1000 for the Viroli Gibbs baselines
-H = 5, 10, 15, 20
-G = 2 or 3 on every factor coordinate
-separation = 1
+H = 5, 10
+G_h = 2 for all factor coordinates, or G_h = 3 for all coordinates
+separation = 2
 replications = 25
 loading design = Cross/IFEval-like
-loading strength = weak Uniform(1.25, 1.75) or strong Uniform(2.50, 3.00)
-cross-loading probability = 0.075 or 0.20
+block size mode = ifeval_min30
+smallest primary block size >= 30
+primary loading magnitude = Uniform(2, 3)
+cross-loading magnitude = Uniform(2, 3)
+cross-loading probability = 0.05
 cross-loading signs = random
-block size mode = balanced or ifeval_like
 intercept mode = ifeval_like
 mixture parameter mode = viroli_smoke
 alignment mode = loadings
 ```
 
-In this final grid, "loading strength" applies to every nonzero loading:
-primary loadings and cross-loadings use the same magnitude range.  Primary
-loadings are positive; cross-loadings are randomly signed.
+The loading matrix and mixture parameters are fixed within each design cell.
+Each replication draws a new set of factor scores, mixture classes, probit
+noise, and binary responses from that fixed population model.  Smaller `p`
+settings use nested block-wise subsets of a master `p = 2000` loading matrix,
+so increasing `p` increases item support without changing to an unrelated
+population loading design.
 
 Methods:
 
 ```text
 independent_marginal_mixture:
-  EM-SVD probit signal pretraining, sparse rotation, MAP refinement
-  PRETRAIN_LOADING_PENALTY = 10
-  ROTATION_LOADING_L1_PENALTY = 10
-  LAMBDA_L1_PENALTY = 10
+  EM-SVD probit signal pretraining, Riemannian rotation, MAP refinement
+  PRODUCT_INTERNAL_WORKERS = 18
+  PRETRAIN_LOADING_PENALTY, ROTATION_LOADING_L1_PENALTY,
+  and LAMBDA_L1_PENALTY follow LAMBDA_L1_PENALTY_BY_N
 
 viroli_laplace_gibbs:
   probit-augmented independent-mixture Gibbs
-  Bayesian lasso loading prior with VIROLI_LAMBDA_L1_PENALTY = 10
+  Bayesian lasso loading prior
+  VIROLI_LAMBDA_L1_PENALTY follows LAMBDA_L1_PENALTY_BY_N
+  VIROLI_ITER = 2000, VIROLI_BURN = 1000
 
 viroli_gaussian_gibbs:
   same Gibbs sampler with diffuse Gaussian loading prior
   VIROLI_LAMBDA_L1_PENALTY = 0
+  VIROLI_ITER = 2000, VIROLI_BURN = 1000
+```
+
+Default n-dependent penalty schedule:
+
+```text
+LAMBDA_L1_PENALTY_BY_N = 100=5,200=5,400=8
 ```
 
 All methods use the same generated data for a scenario and replication.  Dense
 joint mixture parameter tables are skipped when `G^H` exceeds
 `MAX_JOINT_PARAMETER_K`; marginal mixture RMSEs are always recorded.
 
-The main launcher should be used for paper-facing simulation results because it
-records every design setting in each output row and writes resumable chunk files.
+The completed main run contains 2400 rows:
+
+```text
+1200 Product MAP rows
+ 600 Viroli Laplace Gibbs rows
+ 600 Viroli Gaussian Gibbs rows
+```
+
+Raw output, ignored by git:
+
+```text
+results/full/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10/comparison_results.csv
+```
+
+Committed selected summaries:
+
+```text
+results/selected_tables/sample_size/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10_*.csv
+results/selected_plots/sample_size/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10/
+```

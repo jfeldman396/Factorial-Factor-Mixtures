@@ -2,6 +2,44 @@
 
 This note records the current reproducibility audit status for the repository.
 
+## 2026-09-11 Main Simulation Reproducibility Cleanup
+
+Scope checked:
+
+- Updated the repository overview, compact reproduce guide, detailed
+  replication guide, sample-size script README, fixed-IFEval simulation design
+  note, and simulation settings ledger to point to the current main simulation:
+  `fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10`.
+- Verified the completed raw main result file has 2400 rows:
+  - 1200 Product MAP rows;
+  - 600 Viroli Laplace Gibbs rows;
+  - 600 Viroli Gaussian Gibbs rows.
+- Regenerated fixed-IFEval true Lambda heatmaps and selected progress plots for
+  the current run label.
+- Re-rendered `docs/fixed_ifeval_lambda_simulation_design.pdf` from the
+  updated Markdown source and rendered its pages with Ghostscript for visual
+  inspection.
+- Parsed the main sample-size launcher, plotting scripts, and touched shared R
+  files.
+- Left full raw output under `results/full/` ignored by git; selected CSV
+  snapshots and figures are the committed GitHub artifacts.
+
+Commands used:
+
+```sh
+Rscript -e 'files <- c("scripts/sample_size/run_fixed_ifeval_lambda_simulation.R", "scripts/sample_size/plot_fixed_ifeval_lambda_heatmaps.R", "scripts/sample_size/plot_fixed_ifeval_lambda_progress.R", "R/probit_ifa_em_svd_pretraining.R", "R/riemannian_rotation.R"); for (f in files) { parse(f); cat("parsed", f, "\n") }'
+Rscript scripts/sample_size/plot_fixed_ifeval_lambda_heatmaps.R
+Rscript scripts/sample_size/plot_fixed_ifeval_lambda_progress.R
+pandoc docs/fixed_ifeval_lambda_simulation_design.md -o docs/fixed_ifeval_lambda_simulation_design.pdf --pdf-engine=pdflatex
+gs -dNOPAUSE -dBATCH -sDEVICE=pngalpha -r160 -sOutputFile=tmp/pdfs/fixed_ifeval_design_render_gs/page-%02d.png docs/fixed_ifeval_lambda_simulation_design.pdf
+```
+
+Current raw main output, intentionally ignored by git:
+
+```text
+results/full/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10/comparison_results.csv
+```
+
 ## 2026-09-04 Final Simulation Cleanup
 
 Scope checked:

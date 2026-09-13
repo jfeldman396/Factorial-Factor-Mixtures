@@ -14,36 +14,69 @@ The current scripts use base R plus common CRAN packages including `MASS`, `trun
 
 ## Sample-Size Simulation
 
-The active simulation launcher is:
+The paper-facing main simulation launcher is:
 
 ```sh
-Rscript scripts/sample_size/run_sampledZ_full_pgrid_smallp_gibbs_MAP_intercepts.R
+Rscript scripts/sample_size/run_fixed_ifeval_lambda_simulation.R
 ```
 
-The canonical plotting scripts are:
+It reproduces the fixed-DGP IFEval-like Lambda simulation:
+
+- `n in {100, 200, 400}`;
+- Product MAP `p in {500, 1000, 1500, 2000}`;
+- Viroli Gibbs baselines `p in {500, 1000}`;
+- `H in {5, 10}`;
+- `G_h = 2` for all factors, or `G_h = 3` for all factors;
+- 25 replications per setting;
+- IFEval-like unbalanced loading blocks with at least 30 primary items in the
+  smallest block;
+- primary and cross-loading magnitudes sampled from `Uniform(2, 3)`;
+- randomly signed cross-loadings with probability `0.05`;
+- mixture separation `2`;
+- n-dependent loading penalties: `5` for `n = 100, 200` and `8` for
+  `n = 400`.
+
+The raw run directory is:
 
 ```sh
-OUT_DIR=results/full/sampledZ_pgrid_balanced_crossloading_smallp_gibbs_MAP_intercepts \
-Rscript scripts/sample_size/plot_dgp_loading_heatmaps.R
-
-OUT_DIR=results/full/sampledZ_pgrid_balanced_crossloading_smallp_gibbs_MAP_intercepts \
-Rscript scripts/sample_size/plot_sample_size_rmse_panels.R
-
-OUT_DIR=results/full/sampledZ_pgrid_balanced_crossloading_smallp_gibbs_MAP_intercepts \
-Rscript scripts/sample_size/plot_sample_size_timing_lines.R
+results/full/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10
 ```
 
-Use the unbalanced output directory in the same commands to refresh the
-moderately IFEval-like block-size results:
+That directory is ignored by git because it contains chunk logs and large
+checkpoint artifacts. The combined raw CSV is:
 
 ```sh
-OUT_DIR=results/full/sampledZ_pgrid_unbalanced_crossloading_smallp_gibbs_MAP_intercepts
+results/full/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10/comparison_results.csv
 ```
 
-The main launcher uses sampled augmented `Z` pretraining, MAP refinement,
-`p in {250,500,1000,2000}`, and runs the Gibbs comparator only for
-`p in {250,500}`. Important settings are also recorded in
-`configs/sample_size_intercepts_centered.env`.
+The current completed run has 2400 rows: 1200 Product MAP rows, 600 Viroli
+Laplace Gibbs rows, and 600 Viroli Gaussian Gibbs rows.
+
+Regenerate the committed loading heatmaps and selected result plots with:
+
+```sh
+Rscript scripts/sample_size/plot_fixed_ifeval_lambda_heatmaps.R
+Rscript scripts/sample_size/plot_fixed_ifeval_lambda_progress.R
+```
+
+Selected plots are stored under:
+
+```sh
+results/selected_plots/sample_size/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10
+```
+
+Selected CSV snapshots are stored under:
+
+```sh
+results/selected_tables/sample_size/
+```
+
+For the longer explanation of the design and methods, see:
+
+```sh
+docs/fixed_ifeval_lambda_simulation_design.md
+docs/fixed_ifeval_lambda_simulation_design.pdf
+```
 
 ## IFEval Analysis
 

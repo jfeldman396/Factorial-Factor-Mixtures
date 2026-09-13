@@ -16,6 +16,9 @@
 #   - Viroli Laplace and diffuse Gaussian Gibbs are run on p <= 1000.
 #   - Mixture complexity is varied through all-2 versus all-3 component
 #     settings; mixed/alternating G settings are intentionally excluded.
+#   - By default, marginal mixtures use separation 2 for clearer component
+#     separation, and the Laplace/loading penalty is 5 for n=100,200 and
+#     8 for n=400.
 
 options(stringsAsFactors = FALSE)
 
@@ -36,6 +39,37 @@ split_csv <- function(x) {
 }
 
 parse_ints <- function(x) as.integer(split_csv(x))
+
+parse_penalty_by_n <- function(x, n_values) {
+  pieces <- split_csv(x)
+  out <- rep(NA_real_, length(n_values))
+  names(out) <- as.character(n_values)
+  for (piece in pieces) {
+    kv <- strsplit(piece, "=", fixed = TRUE)[[1L]]
+    if (length(kv) != 2L) {
+      stop("Penalty schedule entries must look like n=penalty, e.g. 100=5.", call. = FALSE)
+    }
+    n_key <- trimws(kv[1L])
+    value <- as.numeric(trimws(kv[2L]))
+    if (!n_key %in% names(out) || !is.finite(value)) {
+      stop("Penalty schedule contains an unknown n or non-finite penalty: ", piece, call. = FALSE)
+    }
+    out[[n_key]] <- value
+  }
+  if (anyNA(out)) {
+    stop(
+      "Penalty schedule is missing n values: ",
+      paste(names(out)[is.na(out)], collapse = ", "),
+      call. = FALSE
+    )
+  }
+  out
+}
+
+set_env_values <- function(env, values) {
+  for (nm in names(values)) env <- env[names(env) != nm]
+  c(env, values)
+}
 
 safe_token <- function(x) {
   x <- as.character(x)
@@ -155,7 +189,11 @@ p_values_gibbs <- parse_ints(get_env("P_VALUES_GIBBS", "500,1000"))
 h_values <- parse_ints(get_env("H_VALUES", "5,10"))
 g_config_types <- split_csv(get_env("G_CONFIG_TYPES", "all2,all3"))
 rep_values <- parse_ints(get_env("REP_VALUES", paste(seq_len(25L), collapse = ",")))
-run_label <- get_env("RUN_LABEL", "fixed_ifeval_lambda_min30_u2_3_cp0_05_h5_h10")
+penalty_by_n <- parse_penalty_by_n(
+  get_env("LAMBDA_L1_PENALTY_BY_N", "100=5,200=5,400=8"),
+  n_values
+)
+run_label <- get_env("RUN_LABEL", "fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10")
 out_dir <- get_env("OUT_DIR", file.path(repo_root, "results", "full", run_label))
 chunk_dir <- file.path(out_dir, "chunks")
 dir.create(chunk_dir, recursive = TRUE, showWarnings = FALSE)
@@ -188,18 +226,18 @@ common_env <- c(
   INTERCEPT_SD = get_env("INTERCEPT_SD", "0.45"),
   INTERCEPT_BLOCK_SPAN = get_env("INTERCEPT_BLOCK_SPAN", "1.6"),
   INTERCEPT_CLIP = get_env("INTERCEPT_CLIP", "1.75"),
-  SEPARATIONS = get_env("SEPARATIONS", "1"),
+  SEPARATIONS = get_env("SEPARATIONS", "2"),
   OURS_PRETRAINING_METHOD = get_env("OURS_PRETRAINING_METHOD", "em_svd"),
   EM_SVD_INIT = get_env("EM_SVD_INIT", "both"),
   EM_SVD_INIT_Z = get_env("EM_SVD_INIT_Z", "expectation"),
   EM_SVD_ITER = get_env("EM_SVD_ITER", "50"),
   EM_SVD_TOL_LOGLIK = get_env("EM_SVD_TOL_LOGLIK", "1e-5"),
   EM_SVD_TOL_L = get_env("EM_SVD_TOL_L", "1e-4"),
-  PRETRAIN_LOADING_PENALTY = get_env("PRETRAIN_LOADING_PENALTY", "10"),
+  PRETRAIN_LOADING_PENALTY = get_env("PRETRAIN_LOADING_PENALTY", "5"),
   ROTATION_OPTIMIZER = get_env("ROTATION_OPTIMIZER", "riemannian"),
   ROTATION_ITER = get_env("ROTATION_ITER", "20"),
   ROTATION_REQUIRE_MIXTURE_CONVERGENCE = get_env("ROTATION_REQUIRE_MIXTURE_CONVERGENCE", "TRUE"),
-  ROTATION_LOADING_L1_PENALTY = get_env("ROTATION_LOADING_L1_PENALTY", "10"),
+  ROTATION_LOADING_L1_PENALTY = get_env("ROTATION_LOADING_L1_PENALTY", "5"),
   REFINE_ITER = get_env("REFINE_ITER", "50"),
   REFINE_MIN_ITER = get_env("REFINE_MIN_ITER", "3"),
   REFINE_OBJECTIVE_TOLERANCE = get_env("REFINE_OBJECTIVE_TOLERANCE", "1e-3"),
@@ -207,7 +245,7 @@ common_env <- c(
   REFINE_RETURN_BEST_ITERATION = get_env("REFINE_RETURN_BEST_ITERATION", "TRUE"),
   REFINE_SELECTION_OBJECTIVE = get_env("REFINE_SELECTION_OBJECTIVE", "posterior_objective"),
   REFINE_ENFORCE_MONOTONE = get_env("REFINE_ENFORCE_MONOTONE", "TRUE"),
-  LAMBDA_L1_PENALTY = get_env("LAMBDA_L1_PENALTY", "10"),
+  LAMBDA_L1_PENALTY = get_env("LAMBDA_L1_PENALTY", "5"),
   LASSO_BACKEND = get_env("LASSO_BACKEND", "glmnet"),
   GLMNET_STANDARDIZE = get_env("GLMNET_STANDARDIZE", "FALSE"),
   FACTOR_UPDATE = get_env("FACTOR_UPDATE", "marginal"),
@@ -232,14 +270,19 @@ common_env <- c(
   VIROLI_VERBOSE = get_env("VIROLI_VERBOSE", "FALSE")
 )
 
-make_tasks <- function(phase, p_values, method, gibbs_parallel = FALSE, gibbs_inner_workers = "1") {
+make_tasks <- function(phase, p_values, method, n_subset = n_values, loading_penalty = NULL,
+                       gibbs_parallel = FALSE, gibbs_inner_workers = "1") {
   tasks <- list()
   for (rep in rep_values) {
     for (H in h_values) {
       for (g_type in g_config_types) {
         G <- g_config_for_type(g_type, H)
         g_label <- label_g_config(G)
-        name <- paste(phase, method, paste0("rep", rep), paste0("H", H), paste0("G", safe_token(g_label)), sep = "_")
+        penalty_label <- if (is.null(loading_penalty)) NULL else paste0("penalty", safe_token(loading_penalty))
+        name <- paste(
+          c(phase, method, penalty_label, paste0("rep", rep), paste0("H", H), paste0("G", safe_token(g_label))),
+          collapse = "_"
+        )
         task_dir <- file.path(chunk_dir, name)
         env <- c(
           common_env,
@@ -247,8 +290,15 @@ make_tasks <- function(phase, p_values, method, gibbs_parallel = FALSE, gibbs_in
           REP_VALUES = as.character(rep),
           H_VALUES = as.character(H),
           G_CONFIGS = format_g_config(G),
-          NP_GRID = np_grid_from_values(n_values, p_values)
+          NP_GRID = np_grid_from_values(n_subset, p_values)
         )
+        if (!is.null(loading_penalty)) {
+          env <- set_env_values(env, c(
+            PRETRAIN_LOADING_PENALTY = as.character(loading_penalty),
+            ROTATION_LOADING_L1_PENALTY = as.character(loading_penalty),
+            LAMBDA_L1_PENALTY = as.character(loading_penalty)
+          ))
+        }
         if (method == "product_map") {
           env <- c(
             env,
@@ -260,13 +310,18 @@ make_tasks <- function(phase, p_values, method, gibbs_parallel = FALSE, gibbs_in
             PARALLEL_WORKERS = product_internal_workers
           )
         } else if (method == "viroli_laplace") {
+          viroli_penalty <- if (is.null(loading_penalty)) {
+            get_env("VIROLI_LAPLACE_L1_PENALTY", "5")
+          } else {
+            as.character(loading_penalty)
+          }
           env <- c(
             env,
             RUN_OURS = "FALSE",
             RUN_JOINT_MFA = "FALSE",
             RUN_VIROLI = "TRUE",
             VIROLI_METHOD_NAME = "viroli_laplace_gibbs",
-            VIROLI_LAMBDA_L1_PENALTY = get_env("VIROLI_LAPLACE_L1_PENALTY", "10"),
+            VIROLI_LAMBDA_L1_PENALTY = viroli_penalty,
             PARALLEL_OURS = "FALSE",
             PARALLEL_GIBBS = if (isTRUE(gibbs_parallel)) "TRUE" else "FALSE",
             PARALLEL_WORKERS = gibbs_inner_workers
@@ -293,6 +348,26 @@ make_tasks <- function(phase, p_values, method, gibbs_parallel = FALSE, gibbs_in
   tasks
 }
 
+make_penalized_tasks <- function(phase, p_values, method, gibbs_parallel = FALSE, gibbs_inner_workers = "1") {
+  tasks <- list()
+  for (penalty in unique(as.numeric(penalty_by_n))) {
+    n_subset <- as.integer(names(penalty_by_n)[penalty_by_n == penalty])
+    tasks <- c(
+      tasks,
+      make_tasks(
+        phase = phase,
+        p_values = p_values,
+        method = method,
+        n_subset = n_subset,
+        loading_penalty = penalty,
+        gibbs_parallel = gibbs_parallel,
+        gibbs_inner_workers = gibbs_inner_workers
+      )
+    )
+  }
+  tasks
+}
+
 cat("Fixed-DGP IFEval-like Lambda simulation\n")
 cat("Output directory:", out_dir, "\n")
 cat("n grid:", paste(n_values, collapse = ", "), "\n")
@@ -302,10 +377,16 @@ cat("H grid:", paste(h_values, collapse = ", "), "\n")
 cat("G configurations:", paste(g_config_types, collapse = ", "), "\n")
 cat("Block mode: ifeval_min30; nonzero loading magnitudes: Uniform(2, 3)\n")
 cat("Cross-loading probability:", common_env[["CROSS_LOADING_PROB"]], "\n")
+cat("Mixture separation:", common_env[["SEPARATIONS"]], "\n")
+cat(
+  "Penalty by n:",
+  paste(sprintf("n=%s -> %s", names(penalty_by_n), penalty_by_n), collapse = ", "),
+  "\n"
+)
 cat("Replications:", length(rep_values), "\n")
 
 run_task_pool(
-  make_tasks("fixed_ifeval", p_values_product, "product_map"),
+  make_penalized_tasks("fixed_ifeval", p_values_product, "product_map"),
   product_task_workers,
   out_dir,
   chunk_dir,
@@ -317,7 +398,7 @@ gibbs_parallel_p <- p_values_gibbs[p_values_gibbs >= gibbs_parallel_p_min]
 
 if (length(gibbs_serial_p)) {
   run_task_pool(
-    make_tasks("fixed_ifeval_serial", gibbs_serial_p, "viroli_laplace", gibbs_parallel = FALSE, gibbs_inner_workers = gibbs_internal_workers_serial),
+    make_penalized_tasks("fixed_ifeval_serial", gibbs_serial_p, "viroli_laplace", gibbs_parallel = FALSE, gibbs_inner_workers = gibbs_internal_workers_serial),
     gibbs_task_workers,
     out_dir,
     chunk_dir,
@@ -334,7 +415,7 @@ if (length(gibbs_serial_p)) {
 
 if (length(gibbs_parallel_p)) {
   run_task_pool(
-    make_tasks("fixed_ifeval_parallel", gibbs_parallel_p, "viroli_laplace", gibbs_parallel = TRUE, gibbs_inner_workers = gibbs_internal_workers_parallel),
+    make_penalized_tasks("fixed_ifeval_parallel", gibbs_parallel_p, "viroli_laplace", gibbs_parallel = TRUE, gibbs_inner_workers = gibbs_internal_workers_parallel),
     gibbs_task_workers,
     out_dir,
     chunk_dir,

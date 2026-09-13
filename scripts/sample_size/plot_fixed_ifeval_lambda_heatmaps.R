@@ -102,14 +102,14 @@ H_values <- parse_ints(get_env("H_VALUES", "5,10"))
 primary_range <- parse_nums(get_env("PRIMARY_LOADING_RANGE", "2,3"))
 cross_range <- parse_nums(get_env("CROSS_LOADING_RANGE", "2,3"))
 cross_prob <- as.numeric(get_env("CROSS_LOADING_PROB", "0.05"))
-sep <- as.numeric(get_env("SEPARATION", "1"))
+sep <- as.numeric(get_env("SEPARATION", get_env("SEPARATIONS", "2")))
 out_dir <- get_env(
   "OUT_DIR",
-  file.path(repo_root, "results", "selected_plots", "sample_size", "fixed_ifeval_lambda_min30_u2_3_cp0_05_h5_h10", "true_lambda_heatmaps")
+  file.path(repo_root, "results", "selected_plots", "sample_size", "fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10", "true_lambda_heatmaps")
 )
 table_dir <- get_env(
   "TABLE_DIR",
-  file.path(repo_root, "results", "selected_tables", "sample_size", "fixed_ifeval_lambda_min30_u2_3_cp0_05_h5_h10", "true_lambda")
+  file.path(repo_root, "results", "selected_tables", "sample_size", "fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10", "true_lambda")
 )
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 dir.create(table_dir, recursive = TRUE, showWarnings = FALSE)
@@ -150,6 +150,7 @@ for (H in H_values) {
       p = p,
       p_master = p_master,
       loading_seed = loading_seed,
+      separation = sep,
       block_size_mode = "ifeval_min30",
       primary_loading_min = primary_range[1L],
       primary_loading_max = primary_range[2L],
@@ -159,10 +160,11 @@ for (H in H_values) {
       stringsAsFactors = FALSE
     )
     title <- sprintf(
-      "Fixed IFEval-like Lambda, min block size 30\nH=%d, p=%d, |nonzero loading| ~ Uniform(2,3), Pr(cross)=%.2f",
+      "Fixed IFEval-like Lambda, min block size 30\nH=%d, p=%d, |nonzero loading| ~ Uniform(2,3), Pr(cross)=%.2f, sep=%.0f",
       H,
       p,
-      cross_prob
+      cross_prob,
+      sep
     )
     plot_lambda_heatmap(loading$Lambda, loading$block_id, title, file.path(out_dir, paste0(tag, ".png")), c(-3, 3))
     write_lambda_table(loading, settings, file.path(table_dir, paste0(tag, ".csv")))
