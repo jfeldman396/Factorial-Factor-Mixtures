@@ -1,0 +1,131 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{xurl}
+\usepackage{xcolor}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.65em}
+\setlist[itemize]{leftmargin=1.5em,itemsep=0.25em,topsep=0.25em}
+
+\title{\vspace{-2em}Uniform(1,2) Canonical Simulation Update}
+\author{}
+\date{\vspace{-2em}}
+
+\begin{document}
+\maketitle
+
+\section*{Purpose}
+
+This simulation restarts the fixed-DGP IFEval-like comparison using weaker
+nonzero loadings and an apples-to-apples canonical parameterization. The earlier
+Uniform(2,3) loading design was useful as a high-signal case, but it can make
+binary responses nearly deterministic for low and high latent classes. The new
+run uses milder loadings to diagnose whether factor-score collapse and
+parameter discrepancies are driven by saturation of the binary observations.
+
+\section*{Simulation Design}
+
+For each design cell, the structural parameters are fixed and a new binary data
+set is simulated in each replication. The loading matrix uses the IFEval-like
+unbalanced block allocation, with at least 30 primary items in the smallest
+block. Primary and cross-loading magnitudes are both sampled from
+\(\mathrm{Uniform}(1,2)\), cross-loadings occur with probability 0.05, and
+cross-loading signs are randomly assigned.
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+Dimension & Values \\
+\midrule
+Sample size & \(n \in \{100,200,400\}\) \\
+Items, Product MAP & \(p \in \{500,1000,1500,2000\}\) \\
+Items, Gibbs baselines & \(p \in \{500,1000\}\) \\
+Latent factors & \(H \in \{5,10\}\) \\
+Mixture components & \(G_h = 2\) for all \(h\), or \(G_h = 3\) for all \(h\) \\
+Mixture separation & \(\mathrm{sep}=2\) \\
+Replications & 25 per setting \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Product MAP and Viroli Laplace Gibbs use the same loading shrinkage level in
+matched cells:
+\[
+\lambda_{\Lambda}(n) =
+\begin{cases}
+3, & n \in \{100,200\},\\
+6, & n = 400.
+\end{cases}
+\]
+The diffuse Gaussian Viroli baseline has no Laplace loading penalty.
+
+\section*{Canonicalization}
+
+All reported parameter RMSEs use the same canonical factor scale. For each
+factor coordinate, the fitted marginal mixture is transformed to have mean zero
+and variance one. If
+\[
+\tilde f_{ih} = \frac{f_{ih} - m_h}{s_h},
+\]
+then loadings and intercepts are transformed so that the probit linear
+predictor is unchanged:
+\[
+\alpha_j + \sum_{h=1}^H f_{ih}\lambda_{jh}
+=
+\tilde \alpha_j + \sum_{h=1}^H \tilde f_{ih}\tilde \lambda_{jh}.
+\]
+Product MAP is canonicalized after fitting before evaluation. Viroli Gibbs
+normalizes each retained posterior draw using the same convention before
+posterior averaging. This makes factor, loading, intercept, mixture-mean, and
+mixture-variance RMSEs comparable across methods.
+
+\section*{Computation Order}
+
+The run is staged deliberately.
+
+\begin{enumerate}
+\item Product MAP is run first for the full \(p\)-grid. Replications are
+      launched serially, while each fit uses 18 internal workers for
+      conditionally independent updates.
+\item After Product MAP completes, the Gibbs baselines are run for
+      \(p \in \{500,1000\}\). Independent Gibbs jobs are launched in parallel,
+      and each Gibbs fit uses 4 internal workers for conditionally independent
+      blocks. The Markov chain iterations themselves remain serial.
+\end{enumerate}
+
+This separates the fast deterministic estimator from the more expensive Gibbs
+baselines and avoids oversubscribing the machine while Product MAP is using the
+full worker pool.
+
+\section*{Recorded Outputs}
+
+The combined results file records timing, convergence flags, factor RMSE,
+probability-score RMSE, intercept RMSE, loading RMSE, mixture mean RMSE,
+mixture variance RMSE, mixture weight RMSE, and Gibbs effective sample-size
+summaries when available.
+
+The run can be reproduced from the repository root with:
+\begin{verbatim}
+zsh scripts/sample_size/run_uniform12_canonical_product_first_simulation.sh
+\end{verbatim}
+
+The active output directory is:
+\begingroup
+\footnotesize
+\path{results/full/fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_npenalty3_6_h5_h10_canonical_productfirst_gibbsparallel/}
+\par
+\endgroup
+
+The final combined CSV will be:
+\begingroup
+\footnotesize
+\path{results/full/fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_npenalty3_6_h5_h10_canonical_productfirst_gibbsparallel/comparison_results.csv}
+\par
+\endgroup
+
+\end{document}

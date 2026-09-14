@@ -198,6 +198,9 @@ out_dir <- get_env("OUT_DIR", file.path(repo_root, "results", "full", run_label)
 chunk_dir <- file.path(out_dir, "chunks")
 dir.create(chunk_dir, recursive = TRUE, showWarnings = FALSE)
 
+run_product_map <- as.logical(get_env("RUN_PRODUCT_MAP", "TRUE"))
+run_viroli_laplace <- as.logical(get_env("RUN_VIROLI_LAPLACE", "TRUE"))
+run_viroli_gaussian <- as.logical(get_env("RUN_VIROLI_GAUSSIAN", "TRUE"))
 product_task_workers <- as.integer(get_env("TASK_WORKERS_PRODUCT", "1"))
 gibbs_task_workers <- as.integer(get_env("TASK_WORKERS_GIBBS", "1"))
 product_internal_workers <- get_env("PRODUCT_INTERNAL_WORKERS", "18")
@@ -208,6 +211,7 @@ dgp_p_max <- as.character(max(c(p_values_product, p_values_gibbs)))
 
 common_env <- c(
   SEED = get_env("SEED", "20260731"),
+  STABLE_SCENARIO_SEEDS = get_env("STABLE_SCENARIO_SEEDS", "TRUE"),
   RESUME_EXISTING = "TRUE",
   FIX_DGP_PARAMETERS = "TRUE",
   DGP_P_MAX = dgp_p_max,
@@ -245,8 +249,13 @@ common_env <- c(
   REFINE_RETURN_BEST_ITERATION = get_env("REFINE_RETURN_BEST_ITERATION", "TRUE"),
   REFINE_SELECTION_OBJECTIVE = get_env("REFINE_SELECTION_OBJECTIVE", "posterior_objective"),
   REFINE_ENFORCE_MONOTONE = get_env("REFINE_ENFORCE_MONOTONE", "TRUE"),
+  REFINE_NORMALIZE_FACTOR_SCALE = get_env("REFINE_NORMALIZE_FACTOR_SCALE", "FALSE"),
+  REFINE_NORMALIZE_FACTOR_LOCATION = get_env("REFINE_NORMALIZE_FACTOR_LOCATION", "TRUE"),
+  REFINE_FACTOR_SCORE_BOUND = get_env("REFINE_FACTOR_SCORE_BOUND", "3"),
+  CANONICAL_NORMALIZE_OURS = get_env("CANONICAL_NORMALIZE_OURS", "TRUE"),
+  CANONICAL_MIN_SCALE = get_env("CANONICAL_MIN_SCALE", "1e-4"),
   LAMBDA_L1_PENALTY = get_env("LAMBDA_L1_PENALTY", "5"),
-  LASSO_BACKEND = get_env("LASSO_BACKEND", "glmnet"),
+  LASSO_BACKEND = get_env("LASSO_BACKEND", "proximal"),
   GLMNET_STANDARDIZE = get_env("GLMNET_STANDARDIZE", "FALSE"),
   FACTOR_UPDATE = get_env("FACTOR_UPDATE", "marginal"),
   MIXTURE_UPDATE = get_env("MIXTURE_UPDATE", "map"),
@@ -375,7 +384,14 @@ cat("Product p grid:", paste(p_values_product, collapse = ", "), "\n")
 cat("Gibbs p grid:", paste(p_values_gibbs, collapse = ", "), "\n")
 cat("H grid:", paste(h_values, collapse = ", "), "\n")
 cat("G configurations:", paste(g_config_types, collapse = ", "), "\n")
-cat("Block mode: ifeval_min30; nonzero loading magnitudes: Uniform(2, 3)\n")
+cat(
+  "Block mode: ifeval_min30; primary loading magnitudes: Uniform(",
+  common_env[["PRIMARY_LOADING_RANGE"]],
+  "); cross loading magnitudes: Uniform(",
+  common_env[["CROSS_LOADING_RANGE"]],
+  ")\n",
+  sep = ""
+)
 cat("Cross-loading probability:", common_env[["CROSS_LOADING_PROB"]], "\n")
 cat("Mixture separation:", common_env[["SEPARATIONS"]], "\n")
 cat(
@@ -384,19 +400,36 @@ cat(
   "\n"
 )
 cat("Replications:", length(rep_values), "\n")
+cat("Stable scenario data seeds:", common_env[["STABLE_SCENARIO_SEEDS"]], "\n")
+cat("Run Product MAP:", run_product_map, "\n")
+cat("Run Viroli Laplace:", run_viroli_laplace, "\n")
+cat("Run Viroli Gaussian:", run_viroli_gaussian, "\n")
+cat("Product MAP launcher workers:", product_task_workers, "\n")
+cat("Product MAP internal workers:", product_internal_workers, "\n")
+cat("Gibbs launcher workers:", gibbs_task_workers, "\n")
+cat("Gibbs internal workers for serial-p phase:", gibbs_internal_workers_serial, "\n")
+cat("Gibbs internal workers for parallel-p phase:", gibbs_internal_workers_parallel, "\n")
+cat("Gibbs p threshold for within-fit parallelism:", gibbs_parallel_p_min, "\n")
+cat("Product MAP canonical normalization:", common_env[["CANONICAL_NORMALIZE_OURS"]], "\n")
+cat("Product MAP within-refinement scale normalization:", common_env[["REFINE_NORMALIZE_FACTOR_SCALE"]], "\n")
+cat("Product MAP factor score bound:", common_env[["REFINE_FACTOR_SCORE_BOUND"]], "\n")
+cat("Shared canonical min scale:", common_env[["CANONICAL_MIN_SCALE"]], "\n")
+cat("Product MAP loading update backend:", common_env[["LASSO_BACKEND"]], "\n")
 
-run_task_pool(
-  make_penalized_tasks("fixed_ifeval", p_values_product, "product_map"),
-  product_task_workers,
-  out_dir,
-  chunk_dir,
-  "product_map_all_p"
-)
+if (isTRUE(run_product_map)) {
+  run_task_pool(
+    make_penalized_tasks("fixed_ifeval", p_values_product, "product_map"),
+    product_task_workers,
+    out_dir,
+    chunk_dir,
+    "product_map_all_p"
+  )
+}
 
 gibbs_serial_p <- p_values_gibbs[p_values_gibbs < gibbs_parallel_p_min]
 gibbs_parallel_p <- p_values_gibbs[p_values_gibbs >= gibbs_parallel_p_min]
 
-if (length(gibbs_serial_p)) {
+if (isTRUE(run_viroli_laplace) && length(gibbs_serial_p)) {
   run_task_pool(
     make_penalized_tasks("fixed_ifeval_serial", gibbs_serial_p, "viroli_laplace", gibbs_parallel = FALSE, gibbs_inner_workers = gibbs_internal_workers_serial),
     gibbs_task_workers,
@@ -404,6 +437,9 @@ if (length(gibbs_serial_p)) {
     chunk_dir,
     "viroli_laplace_serial_p"
   )
+}
+
+if (isTRUE(run_viroli_gaussian) && length(gibbs_serial_p)) {
   run_task_pool(
     make_tasks("fixed_ifeval_serial", gibbs_serial_p, "viroli_gaussian", gibbs_parallel = FALSE, gibbs_inner_workers = gibbs_internal_workers_serial),
     gibbs_task_workers,
@@ -413,7 +449,7 @@ if (length(gibbs_serial_p)) {
   )
 }
 
-if (length(gibbs_parallel_p)) {
+if (isTRUE(run_viroli_laplace) && length(gibbs_parallel_p)) {
   run_task_pool(
     make_penalized_tasks("fixed_ifeval_parallel", gibbs_parallel_p, "viroli_laplace", gibbs_parallel = TRUE, gibbs_inner_workers = gibbs_internal_workers_parallel),
     gibbs_task_workers,
@@ -421,6 +457,9 @@ if (length(gibbs_parallel_p)) {
     chunk_dir,
     "viroli_laplace_parallel_p"
   )
+}
+
+if (isTRUE(run_viroli_gaussian) && length(gibbs_parallel_p)) {
   run_task_pool(
     make_tasks("fixed_ifeval_parallel", gibbs_parallel_p, "viroli_gaussian", gibbs_parallel = TRUE, gibbs_inner_workers = gibbs_internal_workers_parallel),
     gibbs_task_workers,

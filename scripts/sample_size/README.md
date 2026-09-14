@@ -9,6 +9,12 @@ The current paper-facing run label is:
 fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10
 ```
 
+The current diagnostic rerun with weaker nonzero loading magnitudes is:
+
+```text
+fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_npenalty3_6_h5_h10_canonical_productfirst_gibbsparallel
+```
+
 ## Canonical Workflow
 
 1. Generate the true loading matrices and heatmaps:
@@ -28,6 +34,30 @@ fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10
    component counts, 25 replications, IFEval-like block sizes with at least
    30 items in the smallest block, `Uniform(2, 3)` nonzero loadings,
    cross-loading probability `0.05`, and mixture separation `2`.
+
+   Product MAP is scored after final canonical normalization: each fitted
+   factor's marginal mixture has mean zero and variance one, with `alpha` and
+   `Lambda` transformed to preserve the probit linear predictor. Viroli Gibbs
+   uses the same canonical parameterization by normalizing each posterior draw
+   before averaging with the same `canonical_normalize_factor_parameters()`
+   helper and the same `CANONICAL_MIN_SCALE` constant. Raw non-scaled
+   parameters are diagnostic only.
+
+   Keep `STABLE_SCENARIO_SEEDS=TRUE` for method comparisons; this makes the
+   generated dataset depend on the scenario itself rather than the position of
+   that scenario inside a launcher chunk.
+
+   To run the weaker-loading canonical rerun, use:
+
+   ```bash
+   zsh scripts/sample_size/run_uniform12_canonical_product_first_simulation.sh
+   ```
+
+   This sets primary and cross-loading magnitudes to `Uniform(1,2)`, lowers the
+   shared Product MAP/Viroli-Laplace penalty schedule to `3` for `n = 100, 200`
+   and `6` for `n = 400`, runs Product MAP first with serial chunks and 18
+   internal workers, then runs Gibbs chunks in parallel with 4 launcher workers
+   and 4 internal workers per Gibbs fit.
 
 3. Plot interim or final results from the chunk checkpoints:
 
