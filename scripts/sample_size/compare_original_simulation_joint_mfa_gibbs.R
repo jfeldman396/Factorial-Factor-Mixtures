@@ -30,8 +30,9 @@ source(file.path(repo_root, "R", "probit_signal_metrics.R"))
 source(file.path(repo_root, "R", "fit_probit_signal_em_svd_soft.R"))
 source(file.path(repo_root, "R", "probit_ifa_em_svd_soft_pretraining.R"))
 source(file.path(repo_root, "R", "riemannian_rotation.R"))
-source(file.path(repo_root, "R", "viroli_probit_independent_gibbs.R"))
 source(file.path(repo_root, "R", "sample_size_dgp.R"))
+source(file.path(repo_root, "R", "canonical_factor_normalization.R"))
+source(file.path(repo_root, "R", "viroli_probit_independent_gibbs.R"))
 
 get_env <- function(name, default, FUN = identity) {
   value <- Sys.getenv(name, unset = "")
@@ -73,6 +74,21 @@ normalize_G_counts <- function(G, H) {
 
 format_G_config <- function(G) paste(as.integer(G), collapse = "-")
 
+stable_hash_int <- function(..., modulus = 2147483000) {
+  key <- paste(vapply(list(...), as.character, character(1L)), collapse = "|")
+  bytes <- as.integer(charToRaw(enc2utf8(key)))
+  h <- 0
+  for (b in bytes) {
+    h <- ((h * 131) + b + 1L) %% modulus
+  }
+  as.integer(h)
+}
+
+stable_scenario_seed <- function(seed_base, ..., modulus = 2147483000) {
+  offset <- stable_hash_int(..., modulus = modulus)
+  as.integer(1 + ((as.numeric(seed_base) + offset - 1) %% modulus))
+}
+
 parse_np_grid <- function(x) {
   parts <- split_csv(x)
   out <- do.call(rbind, lapply(parts, function(part) {
@@ -91,6 +107,7 @@ out_dir <- get_env(
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
 seed_base <- get_env("SEED", 20260731L, as.integer)
+stable_scenario_seeds <- get_env("STABLE_SCENARIO_SEEDS", TRUE, as.logical)
 rep_values <- get_env("REP_VALUES", 1L, parse_int_csv)
 H_values <- get_env("H_VALUES", get_env("H_TRUE", 4L, as.integer), parse_int_csv)
 G_values <- get_env("G_VALUES", get_env("G_TRUE", 2L, as.integer), parse_int_csv)
@@ -99,6 +116,34 @@ G_configs_input <- if (nzchar(G_configs_env)) parse_g_configs(G_configs_env) els
 separations <- get_env("SEPARATIONS", 1.0, parse_num_csv)
 mixture_param_mode <- get_env("MIXTURE_PARAM_MODE", "equal", as.character)
 mixture_variance_mode <- get_env("MIXTURE_VARIANCE_MODE", "unequal", as.character)
+viroli_smoke_g2_pi <- get_env("VIROLI_SMOKE_G2_PI", c(0.50, 0.50), parse_num_csv)
+viroli_smoke_g2_mu_multiplier <- get_env("VIROLI_SMOKE_G2_MU_MULTIPLIER", 1.0, as.numeric)
+viroli_smoke_g2_sd <- get_env("VIROLI_SMOKE_G2_SD", c(0.55, 0.85), parse_num_csv)
+viroli_smoke_g3_pi <- get_env("VIROLI_SMOKE_G3_PI", c(0.30, 0.40, 0.30), parse_num_csv)
+viroli_smoke_g3_mu_multiplier <- get_env("VIROLI_SMOKE_G3_MU_MULTIPLIER", 1.35, as.numeric)
+viroli_smoke_g3_sd <- get_env("VIROLI_SMOKE_G3_SD", c(0.45, 0.65, 0.45), parse_num_csv)
+if (length(viroli_smoke_g2_pi) != 2L || any(!is.finite(viroli_smoke_g2_pi)) ||
+    any(viroli_smoke_g2_pi <= 0)) {
+  stop("VIROLI_SMOKE_G2_PI must contain two positive finite weights.", call. = FALSE)
+}
+if (!is.finite(viroli_smoke_g2_mu_multiplier) || viroli_smoke_g2_mu_multiplier <= 0) {
+  stop("VIROLI_SMOKE_G2_MU_MULTIPLIER must be positive and finite.", call. = FALSE)
+}
+if (length(viroli_smoke_g2_sd) != 2L || any(!is.finite(viroli_smoke_g2_sd)) ||
+    any(viroli_smoke_g2_sd <= 0)) {
+  stop("VIROLI_SMOKE_G2_SD must contain two positive finite standard deviations.", call. = FALSE)
+}
+if (length(viroli_smoke_g3_pi) != 3L || any(!is.finite(viroli_smoke_g3_pi)) ||
+    any(viroli_smoke_g3_pi <= 0)) {
+  stop("VIROLI_SMOKE_G3_PI must contain three positive finite weights.", call. = FALSE)
+}
+if (!is.finite(viroli_smoke_g3_mu_multiplier) || viroli_smoke_g3_mu_multiplier <= 0) {
+  stop("VIROLI_SMOKE_G3_MU_MULTIPLIER must be positive and finite.", call. = FALSE)
+}
+if (length(viroli_smoke_g3_sd) != 3L || any(!is.finite(viroli_smoke_g3_sd)) ||
+    any(viroli_smoke_g3_sd <= 0)) {
+  stop("VIROLI_SMOKE_G3_SD must contain three positive finite standard deviations.", call. = FALSE)
+}
 intercept_mode <- get_env("INTERCEPT_MODE", "none", as.character)
 intercept_sd <- get_env("INTERCEPT_SD", 0.45, as.numeric)
 intercept_block_span <- get_env("INTERCEPT_BLOCK_SPAN", 1.6, as.numeric)
@@ -177,6 +222,11 @@ ours_convergence_summary <- function(fit) {
   }
   data.frame(
     pretraining_converged = isTRUE(pre$pretraining_converged),
+    pretraining_convergence_reason = if (!is.null(pre$pretraining_convergence_reason)) {
+      pre$pretraining_convergence_reason
+    } else {
+      NA_character_
+    },
     pretraining_completed_iter = if (!is.null(pre$pretraining_completed_iter)) pre$pretraining_completed_iter else NA_integer_,
     selected_pretraining_iteration = if (!is.null(pre$selected_pretraining_iteration)) pre$selected_pretraining_iteration else NA_integer_,
     pretraining_return_best_iteration = isTRUE(pre$return_best_iteration),
@@ -250,6 +300,8 @@ em_svd_iter <- get_env("EM_SVD_ITER", pretrain_aug_iter, as.integer)
 em_svd_tol_loglik <- get_env("EM_SVD_TOL_LOGLIK", 0, as.numeric)
 em_svd_tol_L <- get_env("EM_SVD_TOL_L", NA_real_, as.numeric)
 if (is.na(em_svd_tol_L)) em_svd_tol_L <- NULL
+em_svd_tol_subspace <- get_env("EM_SVD_TOL_SUBSPACE", NA_real_, as.numeric)
+if (is.na(em_svd_tol_subspace)) em_svd_tol_subspace <- NULL
 em_svd_init_method <- get_env("EM_SVD_INIT", "intercept_only", as.character)
 if (!em_svd_init_method %in% c("intercept_only", "viroli_svd", "both")) {
   stop("EM_SVD_INIT must be one of 'intercept_only', 'viroli_svd', or 'both'.")
@@ -292,6 +344,10 @@ rotation_require_mixture_convergence <- get_env("ROTATION_REQUIRE_MIXTURE_CONVER
 refine_require_mixture_convergence <- get_env("REFINE_REQUIRE_MIXTURE_CONVERGENCE", FALSE, as.logical)
 refine_enforce_monotone <- get_env("REFINE_ENFORCE_MONOTONE", TRUE, as.logical)
 refine_monotone_tolerance <- get_env("REFINE_MONOTONE_TOLERANCE", 1e-8, as.numeric)
+refine_normalize_factor_scale <- get_env("REFINE_NORMALIZE_FACTOR_SCALE", TRUE, as.logical)
+refine_normalize_factor_location <- get_env("REFINE_NORMALIZE_FACTOR_LOCATION", TRUE, as.logical)
+refine_factor_score_bound <- get_env("REFINE_FACTOR_SCORE_BOUND", Inf, as.numeric)
+canonical_normalize_ours <- get_env("CANONICAL_NORMALIZE_OURS", FALSE, as.logical)
 
 mfa_iter <- get_env("MFA_ITER", 2000L, as.integer)
 mfa_burn <- get_env("MFA_BURN", 1000L, as.integer)
@@ -319,10 +375,12 @@ viroli_method_name <- get_env("VIROLI_METHOD_NAME", "viroli_independent_factor_g
 viroli_alpha_dirichlet <- get_env("VIROLI_ALPHA_DIRICHLET", 1, as.numeric)
 viroli_normalize_each_draw <- get_env("VIROLI_NORMALIZE_EACH_DRAW", TRUE, as.logical)
 viroli_min_scale <- get_env("VIROLI_MIN_SCALE", mfa_min_scale, as.numeric)
+canonical_min_scale <- get_env("CANONICAL_MIN_SCALE", viroli_min_scale, as.numeric)
 viroli_compute_parameter_ess <- get_env("VIROLI_COMPUTE_PARAMETER_ESS", mfa_compute_parameter_ess, as.logical)
 viroli_verbose <- get_env("VIROLI_VERBOSE", mfa_verbose, as.logical)
 viroli_seed_override <- get_env("VIROLI_SEED", NA_real_, as.numeric)
 write_iteration_histories <- get_env("WRITE_ITERATION_HISTORIES", FALSE, as.logical)
+store_refinement_step_history <- get_env("STORE_REFINEMENT_STEP_HISTORY", FALSE, as.logical)
 write_parameter_tables <- get_env("WRITE_PARAMETER_TABLES", TRUE, as.logical)
 write_parameter_table_max_K <- get_env("WRITE_PARAMETER_TABLE_MAX_K", 5000L, as.integer)
 parallel_ours <- get_env("PARALLEL_OURS", FALSE, as.logical)
@@ -401,9 +459,17 @@ make_viroli_smoke_mixture_params <- function(H, G, sep) {
     if (Gh == 1L) {
       list(pi = 1, mu = 0, sd = 1)
     } else if (Gh == 2L) {
-      list(pi = c(0.50, 0.50), mu = sep * c(-1, 1), sd = c(0.55, 0.85))
+      list(
+        pi = viroli_smoke_g2_pi / sum(viroli_smoke_g2_pi),
+        mu = sep * viroli_smoke_g2_mu_multiplier * c(-1, 1),
+        sd = viroli_smoke_g2_sd
+      )
     } else if (Gh == 3L) {
-      list(pi = c(0.30, 0.40, 0.30), mu = sep * c(-1.35, 0, 1.35), sd = c(0.45, 0.65, 0.45))
+      list(
+        pi = viroli_smoke_g3_pi / sum(viroli_smoke_g3_pi),
+        mu = sep * viroli_smoke_g3_mu_multiplier * c(-1, 0, 1),
+        sd = viroli_smoke_g3_sd
+      )
     } else {
       stop("The Viroli smoke DGP currently supports G_h in {1, 2, 3}.")
     }
@@ -1869,6 +1935,11 @@ write_ours_timing_history <- function(fit, out_file) {
     d$stage <- "map_refinement"
     pieces[[length(pieces) + 1L]] <- d
   }
+  if (!is.null(fit$refine_fit$joint_refinement$step_history)) {
+    d <- fit$refine_fit$joint_refinement$step_history
+    d$stage <- "map_refinement_step"
+    pieces[[length(pieces) + 1L]] <- d
+  }
   timing <- rbind_fill(pieces)
   if (nrow(timing)) write.csv(timing, out_file, row.names = FALSE)
   invisible(timing)
@@ -1913,6 +1984,7 @@ fit_ours <- function(X, H, G, seed) {
       em_max_iter = em_svd_iter,
       em_tol_loglik = em_svd_tol_loglik,
       em_tol_L = em_svd_tol_L,
+      em_tol_subspace = em_svd_tol_subspace,
       em_init_method = em_svd_init_method,
       em_init_z = em_svd_init_z,
       em_random_starts = em_svd_random_starts,
@@ -1957,6 +2029,10 @@ fit_ours <- function(X, H, G, seed) {
       return_best_refinement_iteration = refine_return_best_iteration,
       refinement_selection_objective = refine_selection_objective,
       require_mixture_convergence_for_stop = refine_require_mixture_convergence,
+      store_refinement_step_history = store_refinement_step_history,
+      normalize_factor_scale = refine_normalize_factor_scale,
+      normalize_factor_location = refine_normalize_factor_location,
+      factor_score_bound = refine_factor_score_bound,
       mixture_refit = mixture_refit,
       enforce_monotone_refinement = refine_enforce_monotone,
       monotone_tolerance = refine_monotone_tolerance,
@@ -2018,6 +2094,10 @@ fit_ours <- function(X, H, G, seed) {
       return_best_refinement_iteration = refine_return_best_iteration,
       refinement_selection_objective = refine_selection_objective,
       require_mixture_convergence_for_stop = refine_require_mixture_convergence,
+      store_refinement_step_history = store_refinement_step_history,
+      normalize_factor_scale = refine_normalize_factor_scale,
+      normalize_factor_location = refine_normalize_factor_location,
+      factor_score_bound = refine_factor_score_bound,
       mixture_refit = mixture_refit,
       enforce_monotone_refinement = refine_enforce_monotone,
       monotone_tolerance = refine_monotone_tolerance,
@@ -2065,11 +2145,23 @@ fit_ours <- function(X, H, G, seed) {
       return_best_refinement_iteration = refine_return_best_iteration,
       refinement_selection_objective = refine_selection_objective,
       require_mixture_convergence_for_stop = refine_require_mixture_convergence,
+      store_refinement_step_history = store_refinement_step_history,
+      normalize_factor_scale = refine_normalize_factor_scale,
+      normalize_factor_location = refine_normalize_factor_location,
+      factor_score_bound = refine_factor_score_bound,
       mixture_refit = mixture_refit,
       parallel = parallel_ours,
       workers = parallel_workers,
       seed = seed,
       verbose = FALSE
+    )
+  }
+  if (isTRUE(canonical_normalize_ours)) {
+    fit$refine_fit <- canonical_normalize_refined_fit(
+      fit$refine_fit,
+      min_scale = canonical_min_scale,
+      sign_rule = "none",
+      order_rule = "none"
     )
   }
   fit$seconds <- proc.time()[["elapsed"]] - t0
@@ -2162,8 +2254,32 @@ for (row_idx in seq_len(nrow(design_grid))) {
   } else {
     1 / max(1, K_joint)
   }
-  seed <- seed_base + 100000L * H_scenario + 50000L * sum(G_scenario * seq_along(G_scenario)) +
-    10000L * row$rep + 1000L * row_idx
+  seed <- if (isTRUE(stable_scenario_seeds)) {
+    stable_scenario_seed(
+      seed_base,
+      "data",
+      row$rep,
+      np_row$n,
+      np_row$p,
+      H_scenario,
+      G_label,
+      row$loading_design,
+      block_size_mode,
+      loading_strength,
+      paste(primary_loading_range, collapse = ","),
+      paste(cross_loading_range, collapse = ","),
+      if (is.null(cross_loading_prob)) "default" else cross_loading_prob,
+      cross_sign_mode,
+      row$separation,
+      mixture_param_mode,
+      mixture_variance_mode,
+      intercept_mode,
+      dgp_p_max
+    )
+  } else {
+    seed_base + 100000L * H_scenario + 50000L * sum(G_scenario * seq_along(G_scenario)) +
+      10000L * row$rep + 1000L * row_idx
+  }
   loading_index <- match(row$loading_design, unique(loading_designs))
   block_index <- match(block_size_mode, c("balanced", "ifeval_like", "moderate_ifeval_like", "ifeval_min30"))
   strength_index <- match(loading_strength, c("default", "weak", "strong"))
@@ -2323,6 +2439,7 @@ for (row_idx in seq_len(nrow(design_grid))) {
       G_config = G_label,
       K_joint = K_joint,
       fix_dgp_parameters = fix_dgp_parameters,
+      stable_scenario_seeds = stable_scenario_seeds,
       dgp_parameter_seed = dgp_parameter_seed,
       loading_parameter_seed = loading_parameter_seed,
       mixture_parameter_seed = mixture_parameter_seed,
@@ -2393,6 +2510,12 @@ for (row_idx in seq_len(nrow(design_grid))) {
       glmnet_standardize = glmnet_standardize,
       refine_enforce_monotone = refine_enforce_monotone,
       refine_monotone_tolerance = refine_monotone_tolerance,
+      refine_normalize_factor_scale = refine_normalize_factor_scale,
+      refine_normalize_factor_location = refine_normalize_factor_location,
+      refine_factor_score_bound = refine_factor_score_bound,
+      canonical_normalize_ours = canonical_normalize_ours,
+      canonical_min_scale = canonical_min_scale,
+      store_refinement_step_history = store_refinement_step_history,
       mu_prior_mean = mu_prior_mean,
       mu_prior_kappa = mu_prior_kappa,
       var_prior_shape = var_prior_shape,
@@ -2488,6 +2611,7 @@ for (row_idx in seq_len(nrow(design_grid))) {
       G_config = G_label,
       K_joint = K_joint,
       fix_dgp_parameters = fix_dgp_parameters,
+      stable_scenario_seeds = stable_scenario_seeds,
       dgp_parameter_seed = dgp_parameter_seed,
       loading_parameter_seed = loading_parameter_seed,
       mixture_parameter_seed = mixture_parameter_seed,
@@ -2563,7 +2687,7 @@ for (row_idx in seq_len(nrow(design_grid))) {
       tau_intercept = viroli_tau_intercept,
       lambda_l1_penalty = viroli_lambda_l1_penalty,
       alpha_dirichlet = viroli_alpha_dirichlet,
-      min_scale = viroli_min_scale,
+      min_scale = canonical_min_scale,
       normalize_each_draw = viroli_normalize_each_draw,
       parallel = parallel_gibbs,
       workers = parallel_workers,
@@ -2638,6 +2762,7 @@ for (row_idx in seq_len(nrow(design_grid))) {
       G_config = G_label,
       K_joint = K_joint,
       fix_dgp_parameters = fix_dgp_parameters,
+      stable_scenario_seeds = stable_scenario_seeds,
       dgp_parameter_seed = dgp_parameter_seed,
       loading_parameter_seed = loading_parameter_seed,
       mixture_parameter_seed = mixture_parameter_seed,
@@ -2660,6 +2785,9 @@ for (row_idx in seq_len(nrow(design_grid))) {
       ours_pretraining_method = NA_character_,
       viroli_lambda_l1_penalty = viroli_lambda_l1_penalty,
       viroli_loading_prior = viroli$loading_prior,
+      viroli_normalize_each_draw = viroli_normalize_each_draw,
+      viroli_min_scale = viroli_min_scale,
+      canonical_min_scale = canonical_min_scale,
       min_mixture_var = min_mixture_var,
       viroli_seed = if (is.finite(viroli_seed_override)) as.integer(viroli_seed_override) else seed + 37L,
       parallel_enabled = parallel_gibbs,

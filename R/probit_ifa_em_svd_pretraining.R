@@ -73,6 +73,19 @@ rank_H_centered_projection <- function(W, H) {
   list(alpha = as.numeric(alpha), L = L, svd = dec)
 }
 
+left_singular_subspace_change <- function(U_prev, U_new) {
+  if (is.null(U_prev) || is.null(U_new)) {
+    return(list(max_sin_theta = NA_real_, projection_distance = NA_real_))
+  }
+  sv <- svd(crossprod(U_prev, U_new), nu = 0, nv = 0)$d
+  sv <- pmin(pmax(sv, 0), 1)
+  sin2 <- pmax(0, 1 - sv^2)
+  list(
+    max_sin_theta = sqrt(max(sin2)),
+    projection_distance = sqrt(mean(sin2))
+  )
+}
+
 stochastic_rank_H_centered_projection <- function(
     X,
     alpha,
@@ -129,6 +142,7 @@ fit_lowrank_probit_em_svd_one_start <- function(
     max_iter = 50L,
     tol_loglik = 1e-5,
     tol_L = NULL,
+    tol_subspace = NULL,
     projection_update = c("expectation", "sample_once", "stochastic_average"),
     stochastic_svd_draws = 5L,
     stochastic_svd_average = c("projected_signal", "sample_mean"),
@@ -155,7 +169,9 @@ fit_lowrank_probit_em_svd_one_start <- function(
 
   history <- vector("list", max_iter)
   converged <- FALSE
+  convergence_reason <- "max_iter"
   old_loglik <- probit_ifa_loglik_lowrank(X, alpha, L)
+  U_prev <- NULL
 
   for (iter in seq_len(max_iter)) {
     iter_start <- Sys.time()
@@ -196,6 +212,8 @@ fit_lowrank_probit_em_svd_one_start <- function(
     }
     alpha_new <- projection$alpha
     L_new <- projection$L
+    U_new <- projection$svd$u[, seq_len(H), drop = FALSE]
+    subspace_change <- left_singular_subspace_change(U_prev, U_new)
     projection_seconds <- as.numeric(difftime(Sys.time(), projection_start, units = "secs"))
     objective_start <- Sys.time()
     loglik <- probit_ifa_loglik_lowrank(X, alpha_new, L_new)
@@ -208,6 +226,8 @@ fit_lowrank_probit_em_svd_one_start <- function(
       probit_loglik = loglik,
       relative_loglik_change = rel_loglik,
       relative_L_change = rel_L,
+      left_subspace_max_sin_theta = subspace_change$max_sin_theta,
+      left_subspace_projection_distance = subspace_change$projection_distance,
       projection_update = projection_update,
       stochastic_svd_draws = if (projection_update == "stochastic_average") stochastic_svd_draws else NA_integer_,
       stochastic_svd_average = if (projection_update == "stochastic_average") stochastic_svd_average else NA_character_,
@@ -223,17 +243,28 @@ fit_lowrank_probit_em_svd_one_start <- function(
         ": probit loglik=", round(loglik, 3),
         ", projection=", projection_update,
         ", rel ll=", signif(rel_loglik, 3),
-        ", rel L=", signif(rel_L, 3)
+        ", rel L=", signif(rel_L, 3),
+        ", max sin angle=", signif(subspace_change$max_sin_theta, 3)
       )
     }
 
     alpha <- alpha_new
     L <- L_new
+    U_prev <- U_new
     old_loglik <- loglik
 
     L_done <- is.null(tol_L) || rel_L <= tol_L
+    subspace_done <- !is.null(tol_subspace) &&
+      is.finite(subspace_change$max_sin_theta) &&
+      subspace_change$max_sin_theta <= tol_subspace
+    if (subspace_done) {
+      converged <- TRUE
+      convergence_reason <- "left_subspace"
+      break
+    }
     if (rel_loglik <= tol_loglik && L_done) {
       converged <- TRUE
+      convergence_reason <- "loglik_and_L"
       break
     }
   }
@@ -245,6 +276,7 @@ fit_lowrank_probit_em_svd_one_start <- function(
     probit_loglik = old_loglik,
     history = history,
     converged = converged,
+    convergence_reason = convergence_reason,
     n_completed = nrow(history)
   )
 }
@@ -309,6 +341,7 @@ fit_lowrank_probit_em_svd <- function(
     max_iter = 50L,
     tol_loglik = 1e-5,
     tol_L = NULL,
+    tol_subspace = NULL,
     init_method = c("intercept_only", "viroli_svd", "both"),
     init_z = c("sample", "expectation", "stochastic_average"),
     projection_update = c("expectation", "sample_once", "stochastic_average"),
@@ -370,6 +403,7 @@ fit_lowrank_probit_em_svd <- function(
       max_iter = max_iter,
       tol_loglik = tol_loglik,
       tol_L = tol_L,
+      tol_subspace = tol_subspace,
       projection_update = projection_update,
       stochastic_svd_draws = stochastic_svd_draws,
       stochastic_svd_average = stochastic_svd_average,
@@ -554,6 +588,7 @@ pretrain_probit_ifa_em_svd <- function(
     em_max_iter = 50L,
     em_tol_loglik = 1e-5,
     em_tol_L = NULL,
+    em_tol_subspace = NULL,
     em_init_method = c("intercept_only", "viroli_svd", "both"),
     em_init_z = c("sample", "expectation", "stochastic_average"),
     em_projection_update = c("expectation", "sample_once", "stochastic_average"),
@@ -611,6 +646,7 @@ pretrain_probit_ifa_em_svd <- function(
     max_iter = em_max_iter,
     tol_loglik = em_tol_loglik,
     tol_L = em_tol_L,
+    tol_subspace = em_tol_subspace,
     init_method = em_init_method,
     init_z = em_init_z,
     projection_update = em_projection_update,
@@ -722,6 +758,7 @@ pretrain_probit_ifa_em_svd <- function(
     history = history,
     em_history = lowrank$history,
     pretraining_converged = isTRUE(lowrank$converged),
+    pretraining_convergence_reason = lowrank$convergence_reason,
     pretraining_completed_iter = lowrank$n_completed,
     selected_pretraining_iteration = lowrank$n_completed,
     em_init_method = lowrank$init_method,
@@ -766,11 +803,16 @@ fit_binary_probit_em_svd_pretrain_then_refine <- function(
     refine_var_prior_shape = NULL,
     refine_var_prior_scale = NULL,
     refine_weight_prior_alpha = NULL,
+    factor_score_bound = Inf,
     factor_update = c("marginal", "conditional_soft", "conditional_hard"),
     min_mixture_var = 1e-3,
     lambda_l1_penalty = 0,
     lasso_backend = c("proximal", "glmnet"),
     glmnet_standardize = FALSE,
+    normalize_factor_scale = TRUE,
+    normalize_factor_location = TRUE,
+    factor_scale_target = 1,
+    factor_scale_method = c("sd", "rms"),
     objective_tolerance = 1e-5,
     min_refine_iter = 1L,
     enforce_monotone_refinement = TRUE,
@@ -778,6 +820,7 @@ fit_binary_probit_em_svd_pretrain_then_refine <- function(
     return_best_refinement_iteration = FALSE,
     refinement_selection_objective = c("posterior_objective", "joint_objective", "binary_loglik", "mixture_loglik"),
     require_mixture_convergence_for_stop = FALSE,
+    store_refinement_step_history = FALSE,
     seed = 1L,
     parallel = FALSE,
     workers = NULL,
@@ -788,6 +831,7 @@ fit_binary_probit_em_svd_pretrain_then_refine <- function(
   factor_update <- match.arg(factor_update)
   refinement_selection_objective <- match.arg(refinement_selection_objective)
   lasso_backend <- match.arg(lasso_backend)
+  factor_scale_method <- match.arg(factor_scale_method)
   em_init_method <- match.arg(em_init_method)
   em_init_z <- match.arg(em_init_z)
   em_projection_update <- match.arg(em_projection_update)
@@ -837,9 +881,14 @@ fit_binary_probit_em_svd_pretrain_then_refine <- function(
     weight_prior_alpha = refine_weight_prior_alpha,
     factor_update = factor_update,
     min_mixture_var = min_mixture_var,
+    factor_score_bound = factor_score_bound,
     lambda_l1_penalty = lambda_l1_penalty,
     lasso_backend = lasso_backend,
     glmnet_standardize = glmnet_standardize,
+    normalize_factor_scale = normalize_factor_scale,
+    normalize_factor_location = normalize_factor_location,
+    factor_scale_target = factor_scale_target,
+    factor_scale_method = factor_scale_method,
     objective_tolerance = objective_tolerance,
     min_refine_iter = min_refine_iter,
     stopping_objective = "posterior_objective",
@@ -848,6 +897,7 @@ fit_binary_probit_em_svd_pretrain_then_refine <- function(
     return_best_refinement_iteration = return_best_refinement_iteration,
     refinement_selection_objective = refinement_selection_objective,
     require_mixture_convergence_for_stop = require_mixture_convergence_for_stop,
+    store_refinement_step_history = store_refinement_step_history,
     parallel = parallel,
     workers = workers,
     verbose = verbose,

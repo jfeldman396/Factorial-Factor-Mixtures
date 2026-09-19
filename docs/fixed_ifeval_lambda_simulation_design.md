@@ -34,7 +34,7 @@ f_ih ~ sum_g pi_hg N(mu_hg, sigma_hg^2)
 The mixture parameters are generated with `MIXTURE_PARAM_MODE=viroli_smoke`.
 For `sep = 2`, the raw component parameters are:
 
-- `G_h = 2`: weights `(0.5, 0.5)`, means `(-2, 2)`, sds `(0.55, 0.85)`.
+- `G_h = 2`: weights `(0.5, 0.5)`, means `(-2.7, 2.7)`, sds `(0.45, 0.45)`.
 - `G_h = 3`: weights `(0.3, 0.4, 0.3)`, means `(-1.35, 0, 1.35)`,
   multiplied by `2`, and sds `(0.45, 0.65, 0.45)`.
 
@@ -47,7 +47,7 @@ Only one loading design is used in the main simulation:
 
 - IFEval-like unbalanced item blocks.
 - The smallest primary-loading block has at least 30 items.
-- Nonzero loading magnitudes are sampled from `Uniform(2, 3)`.
+- Nonzero loading magnitudes are sampled from `Uniform(1, 2)`.
 - Cross-loading probability is `0.05`.
 - Cross-loading signs are random.
 - Item intercepts use the IFEval-like intercept design.
@@ -76,20 +76,37 @@ Three methods are compared.
 
 1. Product MAP:
    - EM-SVD probit signal pretraining.
+   - The pretraining stage terminates when the left singular subspace stabilizes
+     at tolerance `2e-3`, or when the usual log-likelihood/loading-change
+     criteria or iteration cap are met.
    - Riemannian rotation toward independent marginal mixtures.
    - MAP refinement with lasso-penalized loading updates.
+   - Refinement uses bounded factor-score updates and does not force scale
+     normalization inside each MAP sweep.
+   - Final estimates are put into the canonical factor parameterization before
+     RMSE is computed: for each factor coordinate, the fitted marginal mixture
+     has mean zero and variance one, and the corresponding `alpha` and
+     `Lambda` are transformed so that `alpha_j + f_i' lambda_j` is unchanged.
    - Uses 18 internal workers.
 
 2. Viroli Laplace Gibbs:
    - Probit-augmented independent-mixture Gibbs sampler.
-   - Laplace loading prior using the same n-dependent penalty schedule as
-     Product MAP: `5` for `n = 100, 200` and `8` for `n = 400`.
+   - Laplace loading prior using the same loading penalty as Product MAP:
+     `lambda = 5` for all `n`, `H`, and `G` settings.
+   - Each posterior draw is transformed to the same canonical factor
+     parameterization before posterior averaging using the shared
+     `canonical_normalize_factor_parameters()` helper also used by Product MAP.
+     Both methods pass the same `CANONICAL_MIN_SCALE` constant to that helper.
    - Uses 4 internal workers.
    - Run for 2000 iterations with 1000 burn-in draws.
 
 3. Viroli Gaussian Gibbs:
    - Same independent-mixture Gibbs sampler.
    - Diffuse Gaussian loading prior.
+   - Each posterior draw is transformed to the same canonical factor
+     parameterization before posterior averaging using the shared
+     `canonical_normalize_factor_parameters()` helper also used by Product MAP.
+     Both methods pass the same `CANONICAL_MIN_SCALE` constant to that helper.
    - Uses 4 internal workers.
    - Run for 2000 iterations with 1000 burn-in draws.
 
@@ -100,8 +117,8 @@ within each fitted method.
 
 Each replication records:
 
-- factor score RMSE after alignment
-- raw factor score RMSE
+- factor score RMSE after alignment and empirical standardization
+- raw factor score RMSE as a diagnostic only, not a paper-facing estimand
 - loading RMSE
 - intercept RMSE
 - marginal mixture mean RMSE
@@ -112,6 +129,10 @@ Each replication records:
 - end-to-end runtime in seconds
 - Gibbs effective sample size summaries when available
 
+Parameter RMSEs are intended to be read on the canonical scale. Raw latent
+scale/location parameters are not identified and should not be used for
+method comparisons.
+
 The output also records the fixed DGP seeds:
 
 - `loading_parameter_seed`
@@ -121,14 +142,22 @@ The output also records the fixed DGP seeds:
 This makes it possible to verify that population parameters are fixed across
 replications while the sampled datasets change.
 
+For matched method comparisons, `STABLE_SCENARIO_SEEDS=TRUE` should be used.
+Then `data_seed` is a deterministic hash of the scientific design cell
+(`rep`, `n`, `p`, `H`, `G`, loading design, cross-loading probability,
+separation, and related DGP settings), not the row position in a launcher
+chunk. This makes Gibbs-only reruns directly comparable to Product MAP chunks
+for the same scenario.
+
 ## Reproduction
 
 From the repository root:
 
 ```bash
-Rscript scripts/sample_size/plot_fixed_ifeval_lambda_heatmaps.R
-Rscript scripts/sample_size/run_fixed_ifeval_lambda_simulation.R
-Rscript scripts/sample_size/plot_fixed_ifeval_lambda_progress.R
+zsh scripts/sample_size/run_full_grid_lambda5_subspace2e3_simulation.sh
+
+RUN_LABEL=fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_lambda5_subspace2e3_seedfix_full_grid \
+Rscript scripts/sample_size/plot_fixed_ifeval_grouped_boxplot_panels.R
 ```
 
 The default run is intentionally resumable.  Existing task chunks are skipped,
@@ -151,7 +180,7 @@ Rscript scripts/sample_size/run_fixed_ifeval_lambda_simulation.R
 Main output root:
 
 ```text
-results/full/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10/
+results/full/fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_lambda5_subspace2e3_seedfix_full_grid/
 ```
 
 Within that directory:
@@ -181,14 +210,14 @@ scripts/sample_size/plot_example_lambda_recovery.R
 Deterministic DGP artifacts use the same run label:
 
 ```text
-fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10
+fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_lambda5_subspace2e3_seedfix_full_grid
 ```
 
 - Selected heatmaps and recovery plots live under:
 
 ```text
 results/selected_plots/sample_size/
-  fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10/
+  fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_lambda5_subspace2e3_seedfix_full_grid/
 ```
 
 - Selected summary CSVs live under the following directory, with the same
@@ -200,3 +229,37 @@ results/selected_tables/sample_size/
 
 - Full raw outputs under `results/full/` are intentionally ignored by git
   because they contain large chunk-level logs and checkpoint files.
+
+## Sensitivity Arms
+
+After the main run, two small robustness arms are run with the same loading
+design, penalties, canonicalization, `n` grid, and `H/G` grid. To keep these as
+"check-box" sensitivity analyses rather than a second full production study,
+they use `p in {500, 1000}` and `5` replications. They retain Product MAP and
+Viroli Laplace Gibbs, but skip the diffuse-Gaussian Gibbs baseline because the
+main simulation already shows that it is dominated.
+
+1. Asymmetric mixture probabilities:
+   - `G_h = 2`: weights `(0.65, 0.35)`, means `(-2.7, 2.7)`,
+     sds `(0.45, 0.45)`.
+   - `G_h = 3`: weights `(0.20, 0.50, 0.30)`, means `(-2.7, 0, 2.7)`,
+     sds `(0.45, 0.65, 0.45)`.
+
+2. Moderate mixture overlap:
+   - `G_h = 2`: weights `(0.50, 0.50)`, means `(-2.2, 2.2)`,
+     sds `(0.60, 0.60)`.
+   - `G_h = 3`: weights `(0.30, 0.40, 0.30)`, means `(-2.2, 0, 2.2)`,
+     sds `(0.60, 0.75, 0.60)`.
+
+Run both arms with:
+
+```bash
+zsh scripts/sample_size/run_lambda5_sensitivity_asym_overlap.sh
+```
+
+The sensitivity output roots are:
+
+```text
+results/full/fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_lambda5_asymmetric_pi_check/
+results/full/fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_lambda5_moderate_overlap_check/
+```

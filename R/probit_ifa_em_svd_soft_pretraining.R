@@ -265,11 +265,16 @@ fit_binary_probit_em_svd_soft_pretrain_then_refine <- function(
     refine_var_prior_shape = NULL,
     refine_var_prior_scale = NULL,
     refine_weight_prior_alpha = NULL,
+    factor_score_bound = Inf,
     factor_update = c("marginal", "conditional_soft", "conditional_hard"),
     min_mixture_var = 1e-3,
     lambda_l1_penalty = 0,
     lasso_backend = c("proximal", "glmnet"),
     glmnet_standardize = FALSE,
+    normalize_factor_scale = TRUE,
+    normalize_factor_location = TRUE,
+    factor_scale_target = 1,
+    factor_scale_method = c("sd", "rms"),
     objective_tolerance = 1e-5,
     min_refine_iter = 1L,
     enforce_monotone_refinement = TRUE,
@@ -277,6 +282,7 @@ fit_binary_probit_em_svd_soft_pretrain_then_refine <- function(
     return_best_refinement_iteration = FALSE,
     refinement_selection_objective = c("posterior_objective", "joint_objective", "binary_loglik", "mixture_loglik"),
     require_mixture_convergence_for_stop = FALSE,
+    store_refinement_step_history = FALSE,
     soft_shrinkage = NULL,
     soft_shrinkage_ratio = 0.5,
     soft_shrinkage_reference = c("dHplus1", "dH", "sqrt_np"),
@@ -291,6 +297,7 @@ fit_binary_probit_em_svd_soft_pretrain_then_refine <- function(
   factor_update <- match.arg(factor_update)
   refinement_selection_objective <- match.arg(refinement_selection_objective)
   lasso_backend <- match.arg(lasso_backend)
+  factor_scale_method <- match.arg(factor_scale_method)
   soft_shrinkage_reference <- match.arg(soft_shrinkage_reference)
   if (is.null(refine_mu_prior_mean)) refine_mu_prior_mean <- mu_prior_mean
   if (is.null(refine_mu_prior_kappa)) refine_mu_prior_kappa <- mu_prior_kappa
@@ -339,9 +346,14 @@ fit_binary_probit_em_svd_soft_pretrain_then_refine <- function(
     weight_prior_alpha = refine_weight_prior_alpha,
     factor_update = factor_update,
     min_mixture_var = min_mixture_var,
+    factor_score_bound = factor_score_bound,
     lambda_l1_penalty = lambda_l1_penalty,
     lasso_backend = lasso_backend,
     glmnet_standardize = glmnet_standardize,
+    normalize_factor_scale = normalize_factor_scale,
+    normalize_factor_location = normalize_factor_location,
+    factor_scale_target = factor_scale_target,
+    factor_scale_method = factor_scale_method,
     objective_tolerance = objective_tolerance,
     min_refine_iter = min_refine_iter,
     stopping_objective = "posterior_objective",
@@ -350,6 +362,7 @@ fit_binary_probit_em_svd_soft_pretrain_then_refine <- function(
     return_best_refinement_iteration = return_best_refinement_iteration,
     refinement_selection_objective = refinement_selection_objective,
     require_mixture_convergence_for_stop = require_mixture_convergence_for_stop,
+    store_refinement_step_history = store_refinement_step_history,
     parallel = parallel,
     workers = workers,
     verbose = verbose,

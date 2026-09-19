@@ -417,41 +417,90 @@ sort_viroli_components <- function(C, pi_mat, mu_mat, sig2_mat, G) {
   list(C = C, pi = pi_mat, mu = mu_mat, sig2 = sig2_mat)
 }
 
-normalize_viroli_draw <- function(F, alpha, Lambda, pi_mat, mu_mat, sig2_mat, G, min_scale = 1e-4) {
-  H <- ncol(F)
-  marginal_mean <- numeric(H)
-  marginal_scale <- numeric(H)
+viroli_require_canonical_normalizer <- function() {
+  if (exists("canonical_normalize_factor_parameters", mode = "function")) {
+    return(invisible(TRUE))
+  }
+
+  candidates <- c(
+    file.path(getwd(), "R", "canonical_factor_normalization.R"),
+    file.path(dirname(getwd()), "R", "canonical_factor_normalization.R")
+  )
+  for (path in candidates) {
+    if (file.exists(path)) {
+      source(path)
+      if (exists("canonical_normalize_factor_parameters", mode = "function")) {
+        return(invisible(TRUE))
+      }
+    }
+  }
+
+  stop(
+    "canonical_normalize_factor_parameters() is required before Viroli normalization. ",
+    "Source R/canonical_factor_normalization.R before R/viroli_probit_independent_gibbs.R.",
+    call. = FALSE
+  )
+}
+
+viroli_mixture_fits_from_matrices <- function(pi_mat, mu_mat, sig2_mat, G) {
+  H <- length(G)
+  lapply(seq_len(H), function(h) {
+    Gh <- G[h]
+    list(
+      pi = pi_mat[h, seq_len(Gh)],
+      mu = mu_mat[h, seq_len(Gh)],
+      var = sig2_mat[h, seq_len(Gh)]
+    )
+  })
+}
+
+viroli_mixture_matrices_from_fits <- function(mixture_fits, G, G_max = max(G)) {
+  H <- length(G)
+  pi_mat <- matrix(NA_real_, H, G_max)
+  mu_mat <- matrix(NA_real_, H, G_max)
+  sig2_mat <- matrix(NA_real_, H, G_max)
 
   for (h in seq_len(H)) {
     Gh <- G[h]
-    pi_h <- pi_mat[h, seq_len(Gh)]
-    pi_h <- pi_h / sum(pi_h)
-    mu_h <- mu_mat[h, seq_len(Gh)]
-    sig2_h <- sig2_mat[h, seq_len(Gh)]
-    m_h <- sum(pi_h * mu_h)
-    second_h <- sum(pi_h * (sig2_h + mu_h^2))
-    v_h <- max(second_h - m_h^2, min_scale^2)
-    s_h <- sqrt(v_h)
-    marginal_mean[h] <- m_h
-    marginal_scale[h] <- s_h
-
-    F[, h] <- (F[, h] - m_h) / s_h
-    mu_mat[h, seq_len(Gh)] <- (mu_h - m_h) / s_h
-    sig2_mat[h, seq_len(Gh)] <- sig2_h / s_h^2
-    Lambda[, h] <- Lambda[, h] * s_h
+    fit <- mixture_fits[[h]]
+    pi_mat[h, seq_len(Gh)] <- fit$pi[seq_len(Gh)]
+    mu_mat[h, seq_len(Gh)] <- fit$mu[seq_len(Gh)]
+    sig2_mat[h, seq_len(Gh)] <- fit$var[seq_len(Gh)]
   }
 
-  alpha <- alpha + as.numeric(Lambda %*% (marginal_mean / marginal_scale))
+  list(pi = pi_mat, mu = mu_mat, sig2 = sig2_mat)
+}
+
+normalize_viroli_draw <- function(F, alpha, Lambda, pi_mat, mu_mat, sig2_mat, G, min_scale = 1e-4) {
+  viroli_require_canonical_normalizer()
+  G <- normalize_G_fixed(G, ncol(F))
+  mixture_fits <- viroli_mixture_fits_from_matrices(pi_mat, mu_mat, sig2_mat, G)
+  normalized <- canonical_normalize_factor_parameters(
+    F_hat = F,
+    Lambda = Lambda,
+    alpha = alpha,
+    mixture_fits = mixture_fits,
+    min_scale = min_scale,
+    sign_rule = "none",
+    order_rule = "none"
+  )
+  matrices <- viroli_mixture_matrices_from_fits(
+    normalized$mixture_fits,
+    G = G,
+    G_max = ncol(pi_mat)
+  )
 
   list(
-    F = F,
-    alpha = alpha,
-    Lambda = Lambda,
-    pi = pi_mat,
-    mu = mu_mat,
-    sig2 = sig2_mat,
-    marginal_mean_before = marginal_mean,
-    marginal_scale_before = marginal_scale
+    F = normalized$F_hat,
+    alpha = normalized$alpha,
+    Lambda = normalized$Lambda,
+    pi = matrices$pi,
+    mu = matrices$mu,
+    sig2 = matrices$sig2,
+    marginal_mean_before = normalized$location_before,
+    marginal_scale_before = normalized$scale_before,
+    max_abs_eta_difference = normalized$max_abs_eta_difference,
+    rms_eta_difference = normalized$rms_eta_difference
   )
 }
 

@@ -632,7 +632,8 @@ update_one_factor_score <- function(
     responsibility_i = NULL,
     factor_update = c("marginal", "conditional_soft", "conditional_hard"),
     mixture_prior_weight = 1,
-    maxit = 50L) {
+    maxit = 50L,
+    factor_score_bound = Inf) {
   # Pipeline role: update one subject's H-dimensional factor score by MAP while
   # holding Lambda, alpha, and the mixture prior fixed.
   factor_update <- match.arg(factor_update)
@@ -642,6 +643,16 @@ update_one_factor_score <- function(
   if (is.null(alpha)) alpha <- rep(0, length(x_i))
   alpha <- as.numeric(alpha)
   H <- length(f_init)
+  factor_score_bound <- as.numeric(factor_score_bound)
+  if (!length(factor_score_bound) || !is.finite(factor_score_bound[1L]) ||
+      factor_score_bound[1L] <= 0) {
+    lower <- rep(-Inf, H)
+    upper <- rep(Inf, H)
+  } else {
+    lower <- rep(-factor_score_bound[1L], H)
+    upper <- rep(factor_score_bound[1L], H)
+    f_init <- pmin(pmax(f_init, lower), upper)
+  }
 
   objective <- function(f) {
     # Binary probit contribution for subject i.
@@ -704,6 +715,8 @@ update_one_factor_score <- function(
       fn = objective,
       gr = gradient,
       method = "L-BFGS-B",
+      lower = lower,
+      upper = upper,
       control = list(maxit = maxit, factr = 1e7)
     ),
     error = function(e) NULL
@@ -721,6 +734,7 @@ update_factor_scores_joint_map <- function(
     factor_update = c("marginal", "conditional_soft", "conditional_hard"),
     mixture_prior_weight = 1,
     maxit_per_subject = 50L,
+    factor_score_bound = Inf,
     parallel = FALSE,
     workers = NULL,
     verbose = FALSE) {
@@ -758,7 +772,8 @@ update_factor_scores_joint_map <- function(
       responsibility_i = responsibility_i,
       factor_update = factor_update,
       mixture_prior_weight = mixture_prior_weight,
-      maxit = maxit_per_subject
+      maxit = maxit_per_subject,
+      factor_score_bound = factor_score_bound
     )
     if (verbose && i %% 100 == 0L) {
       message("  optimized factor scores for ", i, " subjects.")
@@ -1150,6 +1165,7 @@ fit_binary_probit_refinement <- function(
     var_prior_scale = 0.3,
     weight_prior_alpha = 1,
     mixture_prior_weight = 1,
+    factor_score_bound = Inf,
     estimate_intercept = TRUE,
     preestimate_loadings = TRUE,
     lambda_l1_penalty = 0,
@@ -1170,6 +1186,7 @@ fit_binary_probit_refinement <- function(
     refinement_selection_objective = c("posterior_objective", "joint_objective", "binary_loglik", "mixture_loglik"),
     require_mixture_convergence_for_stop = FALSE,
     store_refinement_trace = FALSE,
+    store_refinement_step_history = FALSE,
     parallel = FALSE,
     workers = NULL,
     verbose = TRUE,
@@ -1304,6 +1321,63 @@ fit_binary_probit_refinement <- function(
     iteration_seconds = NA_real_
   )
 
+  step_history <- list()
+  step_history_index <- 0L
+  record_refinement_step <- function(iteration, step, seconds = NA_real_,
+                                     rejected = FALSE) {
+    current_binary_loglik <- binary_probit_loglik(X, F_hat, Lambda, alpha = alpha)
+    current_mixture_loglik <- mixture_prior_loglik(F_hat, mixture_fits)
+    current_mixture_parameter_logprior <- mixture_parameter_log_prior(
+      mixture_fits,
+      mu_prior_mean = mu_prior_mean,
+      mu_prior_kappa = mu_prior_kappa,
+      var_prior_shape = var_prior_shape,
+      var_prior_scale = var_prior_scale,
+      weight_prior_alpha = weight_prior_alpha
+    )
+    current_lambda_logprior <- lambda_laplace_log_prior(
+      Lambda,
+      lambda_l1_penalty = lambda_l1_penalty_vec
+    )
+    current_joint_objective <- current_binary_loglik +
+      mixture_prior_weight * current_mixture_loglik
+    current_posterior_objective <- current_joint_objective +
+      current_mixture_parameter_logprior +
+      current_lambda_logprior
+    previous_posterior <- if (step_history_index > 0L) {
+      step_history[[step_history_index]]$posterior_objective
+    } else {
+      NA_real_
+    }
+    previous_joint <- if (step_history_index > 0L) {
+      step_history[[step_history_index]]$joint_objective
+    } else {
+      NA_real_
+    }
+    step_history_index <<- step_history_index + 1L
+    step_history[[step_history_index]] <<- data.frame(
+      iteration = as.integer(iteration),
+      step = as.character(step),
+      binary_loglik = current_binary_loglik,
+      mixture_loglik = current_mixture_loglik,
+      mixture_parameter_logprior = current_mixture_parameter_logprior,
+      lambda_logprior = current_lambda_logprior,
+      joint_objective = current_joint_objective,
+      posterior_objective = current_posterior_objective,
+      joint_objective_delta = current_joint_objective - previous_joint,
+      posterior_objective_delta = current_posterior_objective - previous_posterior,
+      max_factor_scale = max(apply(F_hat, 2L, sd)),
+      lambda_l1 = sum(abs(Lambda)),
+      all_mixtures_converged = all(vapply(mixture_fits, function(z) isTRUE(z$converged), logical(1))),
+      rejected_by_monotone_guard = isTRUE(rejected),
+      step_seconds = seconds,
+      stringsAsFactors = FALSE
+    )
+  }
+  if (isTRUE(store_refinement_step_history)) {
+    record_refinement_step(0L, "initial", seconds = NA_real_)
+  }
+
   converged <- FALSE
   n_completed <- 0L
   refinement_trace <- NULL
@@ -1347,11 +1421,15 @@ fit_binary_probit_refinement <- function(
       factor_update = factor_update,
       mixture_prior_weight = mixture_prior_weight,
       maxit_per_subject = maxit_per_subject,
+      factor_score_bound = factor_score_bound,
       parallel = parallel,
       workers = workers,
       verbose = FALSE
     )
     factor_update_seconds <- as.numeric(difftime(Sys.time(), factor_update_start, units = "secs"))
+    if (isTRUE(store_refinement_step_history)) {
+      record_refinement_step(iter, "after_factor_update", seconds = factor_update_seconds)
+    }
 
     location_normalize_start <- Sys.time()
     if (isTRUE(normalize_factor_location)) {
@@ -1366,6 +1444,9 @@ fit_binary_probit_refinement <- function(
       mixture_fits <- located$mixture_fits
     }
     location_normalize_seconds <- as.numeric(difftime(Sys.time(), location_normalize_start, units = "secs"))
+    if (isTRUE(store_refinement_step_history)) {
+      record_refinement_step(iter, "after_location_normalize", seconds = location_normalize_seconds)
+    }
 
     normalize_start <- Sys.time()
     scale_before_normalize <- apply(F_hat, 2L, sd)
@@ -1385,6 +1466,9 @@ fit_binary_probit_refinement <- function(
       scale_after_normalize <- apply(F_hat, 2L, sd)
     }
     normalize_seconds <- as.numeric(difftime(Sys.time(), normalize_start, units = "secs"))
+    if (isTRUE(store_refinement_step_history)) {
+      record_refinement_step(iter, "after_scale_normalize", seconds = normalize_seconds)
+    }
 
     # Step 2: update loadings given the refined factors.
     lambda_update_start <- Sys.time()
@@ -1410,6 +1494,9 @@ fit_binary_probit_refinement <- function(
       alpha <- rep(0, ncol(X))
     }
     lambda_update_seconds <- as.numeric(difftime(Sys.time(), lambda_update_start, units = "secs"))
+    if (isTRUE(store_refinement_step_history)) {
+      record_refinement_step(iter, "after_lambda_update", seconds = lambda_update_seconds)
+    }
 
     factor_var_diag_for_mixture <- NULL
     mixture_refit_responsibilities <- fixed_mixture_responsibilities
@@ -1463,6 +1550,9 @@ fit_binary_probit_refinement <- function(
     )
     mixture_update_seconds <- as.numeric(difftime(Sys.time(), mixture_update_start, units = "secs"))
     all_mixtures_converged <- all(vapply(mixture_fits, function(z) isTRUE(z$converged), logical(1)))
+    if (isTRUE(store_refinement_step_history)) {
+      record_refinement_step(iter, "after_mixture_update", seconds = mixture_update_seconds)
+    }
 
     # Track both pieces of the objective so we can see whether improvements
     # come from binary prediction, better mixture fit, or both.
@@ -1528,6 +1618,9 @@ fit_binary_probit_refinement <- function(
           signif(rejected_drop, 3),
           "."
         )
+      }
+      if (isTRUE(store_refinement_step_history)) {
+        record_refinement_step(iter, "after_monotone_revert", rejected = TRUE)
       }
     }
     lambda_penalty_history[[iter + 1L]] <- data.frame(
@@ -1682,6 +1775,7 @@ fit_binary_probit_refinement <- function(
       weight_prior_alpha = weight_prior_alpha
     ),
     mixture_prior_weight = mixture_prior_weight,
+    factor_score_bound = factor_score_bound,
     estimate_intercept = estimate_intercept,
     lambda_l1_penalty = lambda_l1_penalty,
     lambda_penalty_history = if (length(lambda_penalty_history)) do.call(rbind, lambda_penalty_history) else NULL,
@@ -1695,9 +1789,15 @@ fit_binary_probit_refinement <- function(
     factor_scale_method = factor_scale_method,
     preestimate_loadings = isTRUE(preestimate_loadings),
     store_refinement_trace = isTRUE(store_refinement_trace),
+    store_refinement_step_history = isTRUE(store_refinement_step_history),
     require_mixture_convergence_for_stop = isTRUE(require_mixture_convergence_for_stop),
     refinement_trace = if (isTRUE(store_refinement_trace)) {
       trace_out
+    } else {
+      NULL
+    },
+    step_history = if (isTRUE(store_refinement_step_history) && length(step_history)) {
+      do.call(rbind, step_history)
     } else {
       NULL
     },
@@ -1737,6 +1837,7 @@ fit_binary_probit_pretrain_then_refine <- function(
     factor_update = c("marginal", "conditional_soft", "conditional_hard"),
     min_mixture_var = 1e-3,
     mixture_prior_weight = 1,
+    factor_score_bound = Inf,
     lambda_l1_penalty = 0,
     lasso_backend = c("proximal", "glmnet"),
     glmnet_standardize = FALSE,
@@ -1752,6 +1853,7 @@ fit_binary_probit_pretrain_then_refine <- function(
     return_best_refinement_iteration = FALSE,
     refinement_selection_objective = c("posterior_objective", "joint_objective", "binary_loglik", "mixture_loglik"),
     require_mixture_convergence_for_stop = FALSE,
+    store_refinement_step_history = FALSE,
     parallel = FALSE,
     workers = NULL,
     seed = 20260715L,
@@ -1824,6 +1926,7 @@ fit_binary_probit_pretrain_then_refine <- function(
     return_best_refinement_iteration = return_best_refinement_iteration,
     refinement_selection_objective = refinement_selection_objective,
     require_mixture_convergence_for_stop = require_mixture_convergence_for_stop,
+    store_refinement_step_history = store_refinement_step_history,
     parallel = parallel,
     workers = workers,
     verbose = verbose,

@@ -6,13 +6,7 @@ simulation study.
 The current paper-facing run label is:
 
 ```text
-fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10
-```
-
-The current diagnostic rerun with weaker nonzero loading magnitudes is:
-
-```text
-fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_npenalty3_6_h5_h10_canonical_productfirst_gibbsparallel
+fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_lambda5_subspace2e3_seedfix_full_grid
 ```
 
 ## Canonical Workflow
@@ -26,14 +20,16 @@ fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_npenalty3_6_h5_h10_canonical_productf
 2. Launch or resume the simulation:
 
    ```bash
-   Rscript scripts/sample_size/run_fixed_ifeval_lambda_simulation.R
+   zsh scripts/sample_size/run_full_grid_lambda5_subspace2e3_simulation.sh
    ```
 
    The default grid is `n = 100, 200, 400`, Product MAP `p = 500, 1000,
    1500, 2000`, Gibbs `p = 500, 1000`, `H = 5, 10`, all-2/all-3 marginal
    component counts, 25 replications, IFEval-like block sizes with at least
-   30 items in the smallest block, `Uniform(2, 3)` nonzero loadings,
-   cross-loading probability `0.05`, and mixture separation `2`.
+   30 items in the smallest block, `Uniform(1, 2)` nonzero loadings,
+   cross-loading probability `0.05`, mixture separation `2`, shared
+   Product MAP/Viroli-Laplace penalty `lambda = 5`, and EM-SVD pretraining
+   stopped when the left singular subspace change is below `2e-3`.
 
    Product MAP is scored after final canonical normalization: each fitted
    factor's marginal mixture has mean zero and variance one, with `alpha` and
@@ -47,17 +43,14 @@ fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_npenalty3_6_h5_h10_canonical_productf
    generated dataset depend on the scenario itself rather than the position of
    that scenario inside a launcher chunk.
 
-   To run the weaker-loading canonical rerun, use:
+   To run the two light robustness arms, use:
 
    ```bash
-   zsh scripts/sample_size/run_uniform12_canonical_product_first_simulation.sh
+   zsh scripts/sample_size/run_lambda5_sensitivity_asym_overlap.sh
    ```
 
-   This sets primary and cross-loading magnitudes to `Uniform(1,2)`, lowers the
-   shared Product MAP/Viroli-Laplace penalty schedule to `3` for `n = 100, 200`
-   and `6` for `n = 400`, runs Product MAP first with serial chunks and 18
-   internal workers, then runs Gibbs chunks in parallel with 4 launcher workers
-   and 4 internal workers per Gibbs fit.
+   This keeps the main loading design and estimator settings, then checks
+   moderate asymmetric mixture weights and moderate extra component overlap.
 
 3. Plot interim or final results from the chunk checkpoints:
 
@@ -70,7 +63,7 @@ fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_npenalty3_6_h5_h10_canonical_productf
    ```bash
    METHOD_FILTER=independent_marginal_mixture \
    OUTPUT_TAG=product_map_only \
-   PLOT_DIR=results/selected_plots/sample_size/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10/product_map_only \
+   PLOT_DIR=results/selected_plots/sample_size/fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_lambda5_subspace2e3_seedfix_full_grid/product_map_only \
    Rscript scripts/sample_size/plot_fixed_ifeval_lambda_progress.R
    ```
 
@@ -96,6 +89,11 @@ fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_npenalty3_6_h5_h10_canonical_productf
   summary table, a Product MAP versus Gibbs overlap table once Gibbs rows are
   available, a matched Product MAP versus Viroli Laplace scatter plot, and
   fixed-`H,G` recovery panels showing how RMSE changes with `p`.
+- `plot_fixed_ifeval_grouped_boxplot_panels.R`: creates the presentation-style
+  grouped boxplots by metric, faceted by `p` and `H/G`.
 - `plot_example_lambda_recovery.R`: recreates one simulation cell and writes
   side-by-side true/Product MAP/Viroli Laplace heatmaps, aligned factor-score
   plots, and fitted marginal-mixture overlays.
+- `run_lambda5_sensitivity_asym_overlap.sh`: runs the asymmetric-probability
+  and moderate-overlap robustness checks using the same core grid as the main
+  simulation, excluding only the dominated diffuse-Gaussian Gibbs baseline.
