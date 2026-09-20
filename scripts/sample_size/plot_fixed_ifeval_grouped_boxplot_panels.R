@@ -101,6 +101,7 @@ plot_dir <- get_env(
 table_dir <- get_env("TABLE_DIR", file.path(repo_root, "results", "selected_tables", "sample_size"))
 method_filter <- split_csv(get_env("METHOD_FILTER", "independent_marginal_mixture,viroli_laplace_gibbs"))
 g_component_filter <- get_env("G_COMPONENT_FILTER", "3")
+p_filter <- split_csv(get_env("P_FILTER", ""))
 output_tag <- get_env("OUTPUT_TAG", paste0("G", g_component_filter, "_product_vs_viroli_laplace"))
 
 dir.create(plot_dir, recursive = TRUE, showWarnings = FALSE)
@@ -120,6 +121,9 @@ if (length(method_filter)) {
 if (nzchar(g_component_filter)) {
   g_col <- if ("G_config" %in% names(results)) "G_config" else "G_true"
   results <- results[all_equal_components(results[[g_col]], g_component_filter), , drop = FALSE]
+}
+if (length(p_filter)) {
+  results <- results[as.character(results$p) %in% p_filter, , drop = FALSE]
 }
 if (!nrow(results)) stop("No rows remain after filters.")
 
@@ -171,7 +175,12 @@ plot_metric <- function(metric, label) {
     "Gibbs (Gaussian)" = "#2f9b57"
   )
   title <- paste0(label, " grouped by sample size")
-  subtitle <- "Fixed IFEval-like DGP; p=1500/2000 have Product MAP only when Gibbs was not run"
+  compared_p <- sort(unique(d$p))
+  subtitle <- if (all(compared_p %in% c(500, 1000))) {
+    "Fixed IFEval-like DGP; matched Product MAP and Gibbs cells"
+  } else {
+    "Fixed IFEval-like DGP; p=1500/2000 have Product MAP only when Gibbs was not run"
+  }
   p <- ggplot(d, aes(x = n_label, y = .data[[metric]], fill = method_label, color = method_label)) +
     geom_boxplot(
       position = position_dodge(width = 0.78),

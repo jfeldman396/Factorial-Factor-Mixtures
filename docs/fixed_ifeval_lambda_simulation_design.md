@@ -253,6 +253,24 @@ The committed full-result snapshots are the top-level
 checkpoints and logs remain local working artifacts and are not required to
 reproduce the summary figures.
 
+For the final across-sample-size figures, the separated/default arm replaces
+the old `n = 100, lambda = 5` cells with the completed `n = 100, lambda = 3`
+cells and retains the compatible 25-replication `n in {200, 400}, lambda = 5`
+cells. The provenance-preserving merged snapshot is:
+
+```text
+results/full/fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_npenalty3_5_h5_h10_final_combined/comparison_results.csv
+```
+
+The presentation panels restrict to `p in {500, 1000}`, where both methods
+were run, and provide factor-score, probability, loading, intercept, mixture
+mean, mixture variance, mixture weight, and runtime boxplots separately for
+the all-2 and all-3 mixture configurations. They are under:
+
+```text
+results/selected_plots/sample_size/fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_npenalty3_5_h5_h10_final_combined/grouped_boxplots/
+```
+
 ## Rotation Ablation and Rank Diagnostic
 
 After the recovery comparison finishes, run the paired rotation ablation with:
