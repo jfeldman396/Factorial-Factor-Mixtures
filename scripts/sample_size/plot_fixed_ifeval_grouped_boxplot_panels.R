@@ -109,6 +109,10 @@ default_g_tag <- if (length(g_component_filter)) {
 }
 output_tag <- get_env("OUTPUT_TAG", paste0(default_g_tag, "_product_vs_viroli_laplace"))
 plot_subtitle <- get_env("PLOT_SUBTITLE", "")
+plot_width <- as.numeric(get_env("PLOT_WIDTH", "15.8"))
+plot_height <- as.numeric(get_env("PLOT_HEIGHT", "9.8"))
+plot_dpi <- as.integer(get_env("PLOT_DPI", "300"))
+write_pdf <- as.logical(get_env("WRITE_PDF", "TRUE"))
 
 dir.create(plot_dir, recursive = TRUE, showWarnings = FALSE)
 dir.create(table_dir, recursive = TRUE, showWarnings = FALSE)
@@ -226,11 +230,26 @@ plot_metric <- function(metric, label) {
       strip.background = element_rect(fill = "grey86", color = "grey40"),
       strip.text = element_text(face = "bold"),
       panel.grid.minor = element_blank(),
+      panel.spacing = grid::unit(0.10, "lines"),
+      axis.title.y = element_text(face = "bold"),
       legend.position = "bottom"
     )
-  out_file <- file.path(plot_dir, paste0(safe_token(output_tag), "_grouped_boxplot_", metric, ".png"))
-  ggsave(out_file, p, width = 15.8, height = 9.8, dpi = 180, bg = "white")
-  out_file
+  file_stem <- file.path(plot_dir, paste0(safe_token(output_tag), "_grouped_boxplot_", metric))
+  png_file <- paste0(file_stem, ".png")
+  pdf_file <- paste0(file_stem, ".pdf")
+  ggsave(png_file, p, width = plot_width, height = plot_height, dpi = plot_dpi, bg = "white")
+  if (isTRUE(write_pdf)) {
+    ggsave(
+      pdf_file,
+      p,
+      width = plot_width,
+      height = plot_height,
+      device = grDevices::pdf,
+      bg = "white",
+      useDingbats = FALSE
+    )
+  }
+  paste(c(png_file, if (isTRUE(write_pdf)) pdf_file), collapse = "; ")
 }
 
 written <- vapply(names(metrics), function(metric) plot_metric(metric, metrics[[metric]]), character(1L))

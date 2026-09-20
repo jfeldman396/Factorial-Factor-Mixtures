@@ -68,6 +68,8 @@ by `run_three_arm_recovery_study.sh`.
 3. The authoritative launcher creates all eight presentation boxplots for
    every arm after fitting: factor scores, probabilities, loadings,
    intercepts, mixture means, mixture variances, mixture weights, and runtime.
+   Each panel is saved as a 300-dpi PNG and a vector PDF with identical sizing,
+   facet order, labels, and method colors.
    To plot one run directly:
 
    ```bash

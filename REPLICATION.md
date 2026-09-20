@@ -302,7 +302,8 @@ The plotting phase creates one four-by-four faceted figure for each of eight
 outcomes: factor-score RMSE, probability RMSE, loading RMSE, intercept RMSE,
 mixture-mean RMSE, mixture-variance RMSE, mixture-weight RMSE, and runtime.
 Columns are `p`, rows are the four `H/G` combinations, and boxes are grouped by
-sample size and method.
+sample size and method. Every figure is written as a 300-dpi PNG and a vector
+PDF with consistent dimensions and styling across arms.
 
 ### Targeted And Smoke Runs
 

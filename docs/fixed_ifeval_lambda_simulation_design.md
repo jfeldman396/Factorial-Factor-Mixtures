@@ -177,6 +177,10 @@ RUN_FITS=FALSE RUN_PLOTS=TRUE \
 zsh scripts/sample_size/run_three_arm_recovery_study.sh
 ```
 
+Every metric is written as both a 300-dpi PNG for slides and a vector PDF for
+papers. All three arms use the same dimensions, facet order, method colors, and
+labels.
+
 Figures are written below:
 
 ```text
