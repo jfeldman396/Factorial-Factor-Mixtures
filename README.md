@@ -36,24 +36,21 @@ The current grid uses:
 - Product MAP loading penalties `3` for the final `n = 100` rerun and `5` for
   `n in {200, 400}`;
 - Viroli Laplace Gibbs using the same n-dependent loading penalty schedule;
-- Viroli Gaussian Gibbs with a diffuse Gaussian loading prior.
+- optional Viroli Gaussian Gibbs with a diffuse Gaussian loading prior.
 
-The launcher is `scripts/sample_size/run_fixed_ifeval_lambda_simulation.R`.
-The raw full outputs are written to
-`results/full/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10`
-and are ignored by git.  Selected plots and CSV snapshots are committed under
-`results/selected_plots/sample_size/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10`
-and `results/selected_tables/sample_size`.
+The authoritative launcher is
+`scripts/sample_size/run_three_arm_recovery_study.sh`. It runs the complete
+grid for three mixture settings: separated symmetric mixtures, asymmetric
+mixture probabilities, and moderately overlapping mixtures. The shared
+loading penalty is `3` at `n = 100` and `5` at `n in {200, 400}`. Product MAP
+uses 18 internal workers; Gibbs uses four by default. Every fitted factor
+parameterization is converted to mean zero and variance one before recovery is
+scored, and Gibbs draws are canonicalized before posterior averaging.
 
-The small-sample follow-up reruns the `n = 100` portion of this fixed-DGP
-design with a weaker shared Laplace/loading penalty, `lambda = 3`, for the
-separated/default, asymmetric-probability, and moderate-overlap mixture
-settings. The launcher is
-`scripts/sample_size/run_n100_lambda3_study.sh`; details are in
-`docs/fixed_ifeval_lambda_simulation_design.md`. Final grouped boxplots are
-under the matching run-label directories in
-`results/selected_plots/sample_size`, with compact CSV summaries in
-`results/selected_tables/sample_size`.
+Full chunk outputs are written below `results/full/` and ignored by git.
+Presentation boxplots for all recovery metrics are written below
+`results/selected_plots/sample_size/three_mixture_settings/`, with cell means
+under `results/selected_tables/sample_size/three_mixture_settings/`.
 
 The paired rotation ablation compares FastICA only, FastICA followed by
 mixture rotation, and identity/SVD initialization followed by mixture rotation

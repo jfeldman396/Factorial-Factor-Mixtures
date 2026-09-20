@@ -200,16 +200,16 @@ loading structure resembles the IFEval analysis.
 
 ```text
 docs/fixed_ifeval_lambda_simulation_design.md
-docs/fixed_ifeval_lambda_simulation_design.pdf
 ```
 
-Run or resume the full simulation from the repository root:
+Run or resume the complete three-arm recovery study from the repository root:
 
 ```sh
-Rscript scripts/sample_size/run_fixed_ifeval_lambda_simulation.R
+zsh scripts/sample_size/run_three_arm_recovery_study.sh
 ```
 
-By default this runs:
+This authoritative launcher fixes all scientific and computational settings
+needed to reproduce the paper-facing recovery figures. It runs:
 
 - `n in {100, 200, 400}`;
 - `p in {500, 1000, 1500, 2000}` for Product MAP;
@@ -219,7 +219,7 @@ By default this runs:
 - separation `2`;
 - IFEval-like unbalanced item blocks, with at least 30 primary items in the
   smallest block;
-- nonzero loading magnitudes sampled from `Uniform(2, 3)`;
+- nonzero primary and cross-loading magnitudes sampled from `Uniform(1, 2)`;
 - cross-loading probability `0.05`;
 - randomly signed cross-loadings and block-level primary-loading signs;
 - 25 Monte Carlo replications per setting;
@@ -229,77 +229,129 @@ By default this runs:
   refinement;
 - Viroli Gibbs with a Laplace loading prior using the same n-dependent loading
   penalty schedule as Product MAP;
-- Viroli Gibbs with a diffuse Gaussian loading prior.
+- Viroli Gibbs with a diffuse Gaussian loading prior when
+  `RUN_VIROLI_GAUSSIAN=TRUE` (off by default in the three-arm comparison).
 
-The main output folder is:
-
-```text
-results/full/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10
-```
-
-The run is resumable at the task-chunk level.  Each chunk writes its own
-`comparison_results_checkpoint.csv` under
-`results/full/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10/chunks`.
-The launcher combines completed chunks into:
+The shared loading-penalty schedule is:
 
 ```text
-results/full/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10/comparison_results.csv
+LAMBDA_L1_PENALTY_BY_N=100=3,200=5,400=5
 ```
 
-The completed main run has 2400 result rows: 1200 Product MAP rows, 600 Viroli
-Laplace Gibbs rows, and 600 Viroli Gaussian Gibbs rows.  Full outputs under
-`results/full/` are ignored by git because they contain logs and chunk-level
-artifacts.  Selected CSV snapshots and plots are committed under
-`results/selected_tables/sample_size/` and
-`results/selected_plots/sample_size/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10/`.
+For Product MAP, the per-`n` value is used in pretraining, mixture rotation,
+and MAP refinement. For Gibbs with a Laplace loading prior, the same value is
+used in the Gaussian scale-mixture representation of the Laplace prior.
 
-The default penalty schedule is:
+All method comparisons use the same canonical parameterization. Each factor
+has marginal mean zero and variance one. Product MAP is canonicalized after
+fitting, with the corresponding transformations of `alpha`, `Lambda`, and the
+mixture moments preserving the probit linear predictor. Every retained Gibbs
+draw is canonicalized by the same shared helper before posterior averaging.
+
+### Mixture Arms
+
+The multiplier below acts on the base means `(-2, 2)` for `G=2` and
+`(-2, 0, 2)` for `G=3`, before canonicalization.
+
+| Arm | G | Weights | Mean multiplier | Standard deviations |
+|---|---:|---|---:|---|
+| separated | 2 | `(0.50, 0.50)` | `1.35` | `(0.45, 0.45)` |
+| separated | 3 | `(0.30, 0.40, 0.30)` | `1.35` | `(0.45, 0.65, 0.45)` |
+| asymmetric | 2 | `(0.65, 0.35)` | `1.35` | `(0.45, 0.45)` |
+| asymmetric | 3 | `(0.20, 0.50, 0.30)` | `1.35` | `(0.45, 0.65, 0.45)` |
+| overlap | 2 | `(0.50, 0.50)` | `1.10` | `(0.60, 0.60)` |
+| overlap | 3 | `(0.30, 0.40, 0.30)` | `1.10` | `(0.60, 0.75, 0.60)` |
+
+### Output And Row Counts
+
+The three default output folders are:
 
 ```text
-LAMBDA_L1_PENALTY_BY_N=100=5,200=5,400=8
+results/full/fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_npenalty3_5_full_separated/
+results/full/fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_npenalty3_5_full_asymmetric_pi/
+results/full/fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_npenalty3_5_full_moderate_overlap/
 ```
 
-For Product MAP this sets `PRETRAIN_LOADING_PENALTY`,
-`ROTATION_LOADING_L1_PENALTY`, and `LAMBDA_L1_PENALTY`.  For Viroli Laplace it
-sets `VIROLI_LAMBDA_L1_PENALTY`.  Viroli Gaussian sets the Laplace penalty to
-zero.
+With the default two-method comparison, each arm has `1800` unique result
+rows: `1200` Product MAP rows and `600` Laplace-Gibbs rows. Enabling the
+Gaussian Gibbs baseline adds `600` rows per arm. Each chunk writes a checkpoint
+below `<run>/chunks/`; rerunning the launcher skips completed chunks and
+rebuilds `<run>/comparison_results.csv`.
 
-### Final Simulation Smoke Tests
+Each output root also contains `replication_manifest.txt`, which records the
+actual grid, DGP, methods, penalties, and worker allocation used for that run.
+The launcher finishes by running `validate_three_arm_recovery_study.R`, which
+checks expected row counts, duplicate-free cell/replication keys, and matched
+DGP seeds between Product MAP and Gibbs.
+Full outputs under `results/full/` are ignored by git; selected figures and
+summary tables are written below:
 
-For a fast Product MAP code-path check:
+```text
+results/selected_plots/sample_size/three_mixture_settings/
+results/selected_tables/sample_size/three_mixture_settings/
+```
+
+### Replot Without Refitting
 
 ```sh
-N_VALUES=20 \
-P_VALUES_PRODUCT=40 \
-P_VALUES_GIBBS=40 \
-H_VALUES=2 \
+RUN_FITS=FALSE RUN_PLOTS=TRUE \
+zsh scripts/sample_size/run_three_arm_recovery_study.sh
+```
+
+The plotting phase creates one four-by-four faceted figure for each of eight
+outcomes: factor-score RMSE, probability RMSE, loading RMSE, intercept RMSE,
+mixture-mean RMSE, mixture-variance RMSE, mixture-weight RMSE, and runtime.
+Columns are `p`, rows are the four `H/G` combinations, and boxes are grouped by
+sample size and method.
+
+### Targeted And Smoke Runs
+
+Use `ARM_FILTER` for one or more comma-separated arms:
+
+```sh
+ARM_FILTER=asymmetric_pi,moderate_overlap \
+zsh scripts/sample_size/run_three_arm_recovery_study.sh
+```
+
+For a short end-to-end smoke test, use a new run-label prefix so the diagnostic
+does not share chunks with the production study:
+
+```sh
+RUN_LABEL_PREFIX=fixed_ifeval_three_arm_smoke \
+ARM_FILTER=separated \
+N_VALUES=100 \
+P_VALUES_PRODUCT=500 \
+P_VALUES_GIBBS=500 \
+H_VALUES=5 \
 G_CONFIG_TYPES=all2 \
-REP_VALUES=1 \
-TASK_WORKERS_PRODUCT=1 \
+REP_VALUES=1,2 \
 PRODUCT_INTERNAL_WORKERS=2 \
-VIROLI_ITER=6 \
-VIROLI_BURN=3 \
+TASK_WORKERS_GIBBS=1 \
+GIBBS_INTERNAL_WORKERS_PARALLEL=2 \
+VIROLI_ITER=20 \
+VIROLI_BURN=10 \
 VIROLI_COMPUTE_PARAMETER_ESS=FALSE \
-RUN_LABEL=fixed_ifeval_lambda_smoke \
-Rscript scripts/sample_size/run_fixed_ifeval_lambda_simulation.R
+RUN_PLOTS=FALSE \
+zsh scripts/sample_size/run_three_arm_recovery_study.sh
 ```
 
-To smoke-test only Product MAP, disable Gibbs by giving an empty Gibbs grid:
+These smoke settings only verify code paths and must not be used for scientific
+comparisons.
 
-```sh
-N_VALUES=20 \
-P_VALUES_PRODUCT=40 \
-P_VALUES_GIBBS= \
-H_VALUES=2 \
-G_CONFIG_TYPES=all2 \
-REP_VALUES=1 \
-TASK_WORKERS_PRODUCT=1 \
-PRODUCT_INTERNAL_WORKERS=2 \
-RUN_LABEL=fixed_ifeval_lambda_smoke_product_only \
-Rscript scripts/sample_size/run_fixed_ifeval_lambda_simulation.R
-```
+### Partial-Run Recovery Utilities
 
-These smoke tests only verify code paths.  They are not scientific simulations.
+The following launchers reproduce historical blocks or finish interrupted
+runs, but are not the preferred entry point for a fresh replication:
+
+- `run_n100_lambda3_study.sh`: all three arms at `n = 100`, with 25 reps.
+- `run_product_map_robustness_completion.sh`: Product MAP at `n = 200, 400`
+  for the asymmetric and overlap arms, using one `p_max = 2000` master loading
+  matrix and 25 reps.
+- `run_lambda5_sensitivity_asym_overlap.sh`: superseded five-replication pilot.
+
+The full launcher should be used for a clean study because it guarantees that
+all nested `p` subsets in an arm come from the same `p_max = 2000` loading
+matrix and that the DGP is identical across matched methods.
 
 ### Parallelization
 
@@ -317,72 +369,41 @@ Within Product MAP, internal workers are used for independent marginal mixture
 fits, itemwise loading regressions, and subject-wise factor-score updates.
 The outer EM-SVD, rotation, and refinement sweeps remain sequential.
 
-For Viroli Gibbs, the current launcher runs one task chunk at a time and uses
-four internal workers inside each Gibbs fit:
+For Viroli Gibbs, the production launcher permits four independent task chunks
+and four workers inside each fit:
 
 ```text
-TASK_WORKERS_GIBBS=1
+TASK_WORKERS_GIBBS=4
 GIBBS_INTERNAL_WORKERS_SERIAL=4
 GIBBS_INTERNAL_WORKERS_PARALLEL=4
 ```
 
-This keeps replication scheduling simple while still parallelizing the
-computationally heavy Gibbs conditionals where the implementation supports it.
+These are the recorded production settings, not a guarantee that 16 cores are
+busy continuously: the Gibbs blocks have different parallel fractions and R's
+fork scheduling adds overhead. Runtime comparisons must therefore report the
+worker policy alongside wall time. Override these variables to match a
+different machine; do not change them silently within a reported run.
 
 ### Regenerate Simulation Figures
 
-Representative DGP heatmaps for the fixed IFEval-like loading design:
+The full launcher plots all three arms automatically. For one completed arm,
+the equivalent direct command is:
 
 ```sh
-Rscript scripts/sample_size/plot_fixed_ifeval_lambda_heatmaps.R
+RUN_LABEL=fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_npenalty3_5_full_separated \
+RESULTS_FILE=results/full/fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_npenalty3_5_full_separated/comparison_results.csv \
+PLOT_DIR=results/selected_plots/sample_size/three_mixture_settings/separated \
+TABLE_DIR=results/selected_tables/sample_size/three_mixture_settings \
+METHOD_FILTER=independent_marginal_mixture,viroli_laplace_gibbs \
+G_COMPONENT_FILTER=2,3 \
+P_FILTER=500,1000,1500,2000 \
+OUTPUT_TAG=separated_product_map_vs_gibbs \
+Rscript scripts/sample_size/plot_fixed_ifeval_grouped_boxplot_panels.R
 ```
 
-This writes PNG heatmaps to:
-
-```text
-results/selected_plots/sample_size/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10/true_lambda_heatmaps
-```
-
-and matching loading matrices to:
-
-```text
-results/selected_tables/sample_size/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10/true_lambda
-```
-
-Progress plots from completed chunks:
-
-```sh
-RUN_LABEL=fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10 \
-Rscript scripts/sample_size/plot_fixed_ifeval_lambda_progress.R
-```
-
-This reads the corresponding `results/full/` directory, writes a completed-results
-snapshot to:
-
-```text
-results/selected_tables/sample_size/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10_completed_results.csv
-```
-
-and writes line/boxplot summaries under:
-
-```text
-results/selected_plots/sample_size/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10
-```
-
-To regenerate an example loading-recovery panel for one cell:
-
-```sh
-N_VALUE=200 P_VALUE=500 H_TRUE=5 G_TRUE=3 REP_VALUE=1 \
-LASSO_PENALTY=5 SEPARATIONS=2 \
-Rscript scripts/sample_size/plot_example_lambda_recovery.R
-```
-
-This writes true/Product MAP/Viroli Laplace loading heatmaps, factor-score
-scatter panels, fitted factor-marginal overlays, and aligned matrices under:
-
-```text
-results/selected_plots/sample_size/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10/lambda_recovery_examples
-```
+The same command with the other run label and output directory regenerates the
+asymmetric and overlap figures. Product MAP occupies all four `p` columns;
+Gibbs appears only at `p = 500, 1000`, by design.
 
 ### Interpret Simulation Metrics
 
@@ -415,10 +436,10 @@ fields connect recovery to effective signal strength and loading support.
 
 Selected outputs are committed for immediate inspection:
 
-- fixed IFEval-like simulation DGP heatmaps and recovery plots:
-  `results/selected_plots/sample_size/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10`;
-- fixed IFEval-like simulation summary CSV snapshots:
-  `results/selected_tables/sample_size/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10_*.csv`;
+- three-arm recovery plots:
+  `results/selected_plots/sample_size/three_mixture_settings/`;
+- three-arm cell means and integrity checks:
+  `results/selected_tables/sample_size/three_mixture_settings/`;
 - IFEval plots: `results/selected_plots/ifeval`;
 - IFEval tables: `results/selected_tables/ifeval`;
 - IFEval writeup: `writeup/ifeval_componentwise_G3313.pdf`;

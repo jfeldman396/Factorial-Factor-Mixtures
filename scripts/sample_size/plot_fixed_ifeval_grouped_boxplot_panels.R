@@ -100,9 +100,15 @@ plot_dir <- get_env(
 )
 table_dir <- get_env("TABLE_DIR", file.path(repo_root, "results", "selected_tables", "sample_size"))
 method_filter <- split_csv(get_env("METHOD_FILTER", "independent_marginal_mixture,viroli_laplace_gibbs"))
-g_component_filter <- get_env("G_COMPONENT_FILTER", "3")
+g_component_filter <- split_csv(get_env("G_COMPONENT_FILTER", "3"))
 p_filter <- split_csv(get_env("P_FILTER", ""))
-output_tag <- get_env("OUTPUT_TAG", paste0("G", g_component_filter, "_product_vs_viroli_laplace"))
+default_g_tag <- if (length(g_component_filter)) {
+  paste0("G", paste(g_component_filter, collapse = "_G"))
+} else {
+  "all_G"
+}
+output_tag <- get_env("OUTPUT_TAG", paste0(default_g_tag, "_product_vs_viroli_laplace"))
+plot_subtitle <- get_env("PLOT_SUBTITLE", "")
 
 dir.create(plot_dir, recursive = TRUE, showWarnings = FALSE)
 dir.create(table_dir, recursive = TRUE, showWarnings = FALSE)
@@ -118,9 +124,13 @@ if (!nrow(results)) {
 if (length(method_filter)) {
   results <- results[results$method %in% method_filter, , drop = FALSE]
 }
-if (nzchar(g_component_filter)) {
+if (length(g_component_filter)) {
   g_col <- if ("G_config" %in% names(results)) "G_config" else "G_true"
-  results <- results[all_equal_components(results[[g_col]], g_component_filter), , drop = FALSE]
+  keep_g <- Reduce(`|`, lapply(
+    g_component_filter,
+    function(g) all_equal_components(results[[g_col]], g)
+  ))
+  results <- results[keep_g, , drop = FALSE]
 }
 if (length(p_filter)) {
   results <- results[as.character(results$p) %in% p_filter, , drop = FALSE]
@@ -133,8 +143,20 @@ results$method_label <- factor(
 )
 results$p_label <- factor(paste0("p=", results$p), levels = paste0("p=", sort(unique(results$p))))
 results$n_label <- factor(paste0("n=", results$n), levels = paste0("n=", sort(unique(results$n))))
-results$facet_label <- paste0("H=", results$H_true, ", G=", results$G_config)
-facet_levels <- unique(results$facet_label[order(results$H_true, results$G_config)])
+compact_g_label <- function(g_config) {
+  vapply(strsplit(as.character(g_config), "-", fixed = TRUE), function(parts) {
+    if (length(parts) > 0L && length(unique(parts)) == 1L) {
+      paste0(parts[[1L]], "^", length(parts))
+    } else {
+      paste(parts, collapse = "-")
+    }
+  }, character(1L))
+}
+results$facet_label <- paste0("H=", results$H_true, ", G=", compact_g_label(results$G_config))
+facet_frame <- unique(results[c("H_true", "G_config", "facet_label")])
+facet_g <- suppressWarnings(as.integer(sub("-.*$", "", facet_frame$G_config)))
+facet_frame <- facet_frame[order(-facet_frame$H_true, facet_g), , drop = FALSE]
+facet_levels <- facet_frame$facet_label
 results$facet_label <- factor(results$facet_label, levels = facet_levels)
 
 metrics <- c(
@@ -176,7 +198,9 @@ plot_metric <- function(metric, label) {
   )
   title <- paste0(label, " grouped by sample size")
   compared_p <- sort(unique(d$p))
-  subtitle <- if (all(compared_p %in% c(500, 1000))) {
+  subtitle <- if (nzchar(plot_subtitle)) {
+    plot_subtitle
+  } else if (all(compared_p %in% c(500, 1000))) {
     "Fixed IFEval-like DGP; matched Product MAP and Gibbs cells"
   } else {
     "Fixed IFEval-like DGP; p=1500/2000 have Product MAP only when Gibbs was not run"
