@@ -52,6 +52,18 @@ fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_lambda5_subspace2e3_seedfix_full_grid
    This keeps the main loading design and estimator settings, then checks
    moderate asymmetric mixture weights and moderate extra component overlap.
 
+   To rerun the n=100 production comparison with the weaker shared Laplace
+   penalty selected by the small-sample diagnostic, use:
+
+   ```bash
+   zsh scripts/sample_size/run_n100_lambda3_study.sh
+   ```
+
+   This runs the separated/default, asymmetric-probability, and
+   moderate-overlap mixture settings with `lambda = 3`, Product MAP on
+   `p = 500, 1000, 1500, 2000`, Viroli-Laplace Gibbs on `p = 500, 1000`,
+   `H = 5, 10`, all-2/all-3 marginal component counts, and 25 replications.
+
 3. Plot interim or final results from the chunk checkpoints:
 
    ```bash
@@ -97,3 +109,15 @@ fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_lambda5_subspace2e3_seedfix_full_grid
 - `run_lambda5_sensitivity_asym_overlap.sh`: runs the asymmetric-probability
   and moderate-overlap robustness checks using the same core grid as the main
   simulation, excluding only the dominated diffuse-Gaussian Gibbs baseline.
+- `run_n100_lambda3_study.sh`: runs the n=100 lambda-3 comparison across the
+  separated/default, asymmetric-probability, and moderate-overlap mixture
+  settings.
+- `run_rotation_ablation_three_arms.sh`: runs the paired rotation ablation over
+  the full `n`, `p`, `H`, and `G` grid for all three mixture settings. Each
+  dataset is evaluated with FastICA only, FastICA followed by mixture rotation,
+  and identity/SVD initialization followed by mixture rotation, using both the
+  estimated and oracle latent-response signals. It also fits an overcomplete
+  rank-15 estimated signal and records eigengap-based estimates of `H`.
+- `compare_rotation_fastica_diagnostic.R`: fitting engine for the rotation
+  ablation. It records pre-refinement and post-refinement recovery, end-to-end
+  runtime, estimated-versus-oracle signal error, and the full eigengap profile.

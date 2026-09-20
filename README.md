@@ -30,10 +30,11 @@ The current grid uses:
 - `25` Monte Carlo replications per design cell;
 - IFEval-like unbalanced primary blocks, with at least `30` primary items in
   the smallest block;
-- primary and cross-loading magnitudes sampled from `Uniform(2, 3)`;
+- primary and cross-loading magnitudes sampled from `Uniform(1, 2)`;
 - randomly signed cross-loadings with probability `0.05`;
 - mixture separation `2`;
-- Product MAP loading penalties `5` for `n = 100, 200` and `8` for `n = 400`;
+- Product MAP loading penalties `3` for the final `n = 100` rerun and `5` for
+  `n in {200, 400}`;
 - Viroli Laplace Gibbs using the same n-dependent loading penalty schedule;
 - Viroli Gaussian Gibbs with a diffuse Gaussian loading prior.
 
@@ -43,6 +44,24 @@ The raw full outputs are written to
 and are ignored by git.  Selected plots and CSV snapshots are committed under
 `results/selected_plots/sample_size/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10`
 and `results/selected_tables/sample_size`.
+
+The small-sample follow-up reruns the `n = 100` portion of this fixed-DGP
+design with a weaker shared Laplace/loading penalty, `lambda = 3`, for the
+separated/default, asymmetric-probability, and moderate-overlap mixture
+settings. The launcher is
+`scripts/sample_size/run_n100_lambda3_study.sh`; details are in
+`docs/fixed_ifeval_lambda_simulation_design.md`. Final grouped boxplots are
+under the matching run-label directories in
+`results/selected_plots/sample_size`, with compact CSV summaries in
+`results/selected_tables/sample_size`.
+
+The paired rotation ablation compares FastICA only, FastICA followed by
+mixture rotation, and identity/SVD initialization followed by mixture rotation
+under both estimated and oracle latent responses. It runs across the full grid
+and all three mixture scenarios, and it evaluates rank selection from the
+largest eigengap of a separate overcomplete rank-15 estimated signal. Launch it
+after the recovery study with
+`scripts/sample_size/run_rotation_ablation_three_arms.sh`.
 
 ## IFEval Analysis
 

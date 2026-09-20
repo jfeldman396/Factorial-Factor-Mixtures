@@ -177,6 +177,126 @@ G_CONFIG_TYPES=all2 \
 Rscript scripts/sample_size/run_fixed_ifeval_lambda_simulation.R
 ```
 
+### n=100 lambda-3 small-sample rerun
+
+The final small-sample diagnostic reruns the `n = 100` portion of the same
+fixed-DGP design with a weaker shared Laplace/loading penalty, `lambda = 3`.
+This was added after the lambda sweep showed that the weaker penalty improves
+small-sample factor recovery while retaining the same canonical parameter
+scoring used in the main run.
+
+Run all three `n = 100` arms with:
+
+```bash
+zsh scripts/sample_size/run_n100_lambda3_study.sh
+```
+
+The grid is:
+
+- `n = 100`
+- `p in {500, 1000, 1500, 2000}` for Product MAP
+- `p in {500, 1000}` for Viroli Laplace Gibbs
+- `H in {5, 10}`
+- all-2 and all-3 marginal component configurations
+- `25` replications per cell
+- nonzero loading magnitudes sampled from `Uniform(1, 2)`
+- cross-loading probability `0.05`
+- EM-SVD subspace stopping tolerance `2e-3`
+- `lambda = 3` for Product MAP pretraining, rotation, refinement, and
+  Viroli-Laplace Gibbs
+
+The three mixture arms are:
+
+1. Separated/default:
+   - `G_h = 2`: weights `(0.50, 0.50)`, means `(-2.7, 2.7)`,
+     sds `(0.45, 0.45)`.
+   - `G_h = 3`: weights `(0.30, 0.40, 0.30)`, means `(-2.7, 0, 2.7)`,
+     sds `(0.45, 0.65, 0.45)`.
+2. Asymmetric mixture probabilities:
+   - `G_h = 2`: weights `(0.65, 0.35)`, means `(-2.7, 2.7)`,
+     sds `(0.45, 0.45)`.
+   - `G_h = 3`: weights `(0.20, 0.50, 0.30)`, means `(-2.7, 0, 2.7)`,
+     sds `(0.45, 0.65, 0.45)`.
+3. Moderate mixture overlap:
+   - `G_h = 2`: weights `(0.50, 0.50)`, means `(-2.2, 2.2)`,
+     sds `(0.60, 0.60)`.
+   - `G_h = 3`: weights `(0.30, 0.40, 0.30)`, means `(-2.2, 0, 2.2)`,
+     sds `(0.60, 0.75, 0.60)`.
+
+The output roots are:
+
+```text
+results/full/fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_lambda3_n100_separated/
+results/full/fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_lambda3_n100_asymmetric_pi/
+results/full/fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_lambda3_n100_moderate_overlap/
+```
+
+The corresponding presentation boxplots are written under:
+
+```text
+results/selected_plots/sample_size/<run-label>/grouped_boxplots/
+```
+
+All three arms completed successfully with `600` rows apiece (`400` Product
+MAP rows and `200` Viroli-Laplace Gibbs rows), `25` replications in every
+expected cell, and no duplicate method/cell/replication keys. Compact
+cell-level and headline summaries are committed as:
+
+```text
+results/selected_tables/sample_size/n100_lambda3_three_arm_method_cell_summary.csv
+results/selected_tables/sample_size/n100_lambda3_three_arm_headline_summary.csv
+results/selected_tables/sample_size/n100_lambda3_three_arm_integrity_counts.csv
+```
+
+The committed full-result snapshots are the top-level
+`comparison_results.csv` files in the three output roots above. Chunk-level
+checkpoints and logs remain local working artifacts and are not required to
+reproduce the summary figures.
+
+## Rotation Ablation and Rank Diagnostic
+
+After the recovery comparison finishes, run the paired rotation ablation with:
+
+```bash
+zsh scripts/sample_size/run_rotation_ablation_three_arms.sh
+```
+
+The ablation uses the same three mixture scenarios, fixed IFEval-like loading
+matrices, nested item subsets, and `25` replications. Its grid is:
+
+- `n in {100, 200, 400}`
+- `p in {500, 1000, 1500, 2000}`
+- `H in {5, 10}`
+- all-2 and all-3 marginal component configurations
+- loading penalty `3` at `n = 100` and `5` at `n in {200, 400}`
+
+For every simulated dataset, the same stage-one signal is passed to three
+rotation arms:
+
+1. FastICA only.
+2. FastICA initialization followed by mixture-criterion rotation.
+3. Identity/SVD initialization followed by mixture-criterion rotation.
+
+Each arm is evaluated with both the EM-SVD estimated latent-response signal and
+the oracle latent Gaussian response matrix. Recovery is recorded before and
+after the identical MAP refinement, along with end-to-end runtime and the
+estimated-versus-oracle signal discrepancy.
+
+The rank diagnostic does not compute an eigengap from the usual rank-`H`
+stage-one estimate, because that would build the known rank into the answer.
+Instead, it separately fits an overcomplete rank-15 EM-SVD signal and examines
+candidate ranks `1` through `14`. For each dataset it records:
+
+- the normalized estimated-signal eigenvalue profile;
+- raw and relative adjacent eigengaps and singular-value ratios;
+- the rank selected by the largest value of each criterion;
+- each criterion at the true `H`; and
+- indicators for whether the selected rank equals the true `H`.
+
+Dataset-level and setting-level eigengap outputs are written beside the
+rotation results as `rotation_fastica_eigengap_dataset_results.csv` and
+`rotation_fastica_eigengap_setting_summary.csv`.
+
 Main output root:
 
 ```text
