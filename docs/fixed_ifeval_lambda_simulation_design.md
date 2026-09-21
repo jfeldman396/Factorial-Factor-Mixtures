@@ -181,6 +181,16 @@ Every metric is written as both a 300-dpi PNG for slides and a vector PDF for
 papers. All three arms use the same dimensions, facet order, method colors, and
 labels.
 
+For the completed historical robustness jobs, run:
+
+```bash
+zsh scripts/sample_size/finalize_three_arm_recovery_study.sh
+```
+
+This preserves the source run on every row, validates the intended 25-rep
+Product MAP coverage, records the five-rep `n=200,400` Gibbs robustness scope,
+and verifies all 48 paper-ready PNG/PDF exports.
+
 Figures are written below:
 
 ```text
@@ -205,6 +215,9 @@ preferred entry point for a clean replication:
 - `run_product_map_robustness_completion.sh`: Product MAP at `n = 200, 400`
   for the asymmetric and overlap arms, with `p_max = 2000`.
 - `run_lambda5_sensitivity_asym_overlap.sh`: superseded five-replication pilot.
+- `assemble_three_arm_recovery_results.R` and
+  `finalize_three_arm_recovery_study.sh`: provenance-preserving assembly and
+  final figure export for historical partial runs.
 
 ## Rotation Ablation And Rank Diagnostic
 

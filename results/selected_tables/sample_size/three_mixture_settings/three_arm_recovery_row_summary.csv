@@ -1,0 +1,7 @@
+"mixture_setting","method","rows","unique_cells"
+"separated","independent_marginal_mixture",1200,48
+"separated","viroli_laplace_gibbs",600,24
+"asymmetric_pi","independent_marginal_mixture",1200,48
+"asymmetric_pi","viroli_laplace_gibbs",280,24
+"moderate_overlap","independent_marginal_mixture",1200,48
+"moderate_overlap","viroli_laplace_gibbs",280,24

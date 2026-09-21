@@ -63,7 +63,9 @@ by `run_three_arm_recovery_study.sh`.
    `run_n100_lambda3_study.sh` reproduces the `n = 100` block, and
    `run_product_map_robustness_completion.sh` fills Product MAP cells for
    `n = 200, 400`. They are recovery tools, not the preferred fresh-run entry
-   point.
+   point. After those historical jobs finish, use
+   `finalize_three_arm_recovery_study.sh` to assemble row-level results with
+   explicit source provenance and regenerate the complete figure set.
 
 3. The authoritative launcher creates all eight presentation boxplots for
    every arm after fitting: factor scores, probabilities, loadings,
@@ -96,6 +98,11 @@ by `run_three_arm_recovery_study.sh`.
   convergence criteria, worker counts, output paths, and final plotting.
 - `validate_three_arm_recovery_study.R`: verifies expected row coverage,
   duplicate-free scientific keys, and matched DGP seeds across methods.
+- `assemble_three_arm_recovery_results.R`: combines completed historical
+  study pieces into one authoritative result per mixture arm while retaining
+  source-run and replication-scope columns.
+- `finalize_three_arm_recovery_study.sh`: runs that assembly, exports all eight
+  paper-ready panels per arm as PNG and PDF, and verifies the 48 figure files.
 - `compare_original_simulation_joint_mfa_gibbs.R`: low-level fitting engine
   called by the launcher for each chunk.
 - `plot_fixed_ifeval_lambda_heatmaps.R`: deterministic DGP visualization and

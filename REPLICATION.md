@@ -278,6 +278,14 @@ Gaussian Gibbs baseline adds `600` rows per arm. Each chunk writes a checkpoint
 below `<run>/chunks/`; rerunning the launcher skips completed chunks and
 rebuilds `<run>/comparison_results.csv`.
 
+The checked-in asymmetric and overlap robustness artifacts were assembled
+from completed historical jobs. They contain all `1200` Product MAP rows,
+`200` Gibbs rows at `n=100` (25 replications per cell), and `80` Gibbs rows at
+`n=200,400` (five replications per cell), for `1480` rows per arm. Figure
+subtitles state this unequal Gibbs replication coverage. The separated arm is
+the full `1800`-row comparison. Exact source and replication coverage is in
+`three_arm_recovery_coverage_and_provenance.csv`.
+
 Each output root also contains `replication_manifest.txt`, which records the
 actual grid, DGP, methods, penalties, and worker allocation used for that run.
 The launcher finishes by running `validate_three_arm_recovery_study.R`, which
@@ -296,6 +304,13 @@ results/selected_tables/sample_size/three_mixture_settings/
 ```sh
 RUN_FITS=FALSE RUN_PLOTS=TRUE \
 zsh scripts/sample_size/run_three_arm_recovery_study.sh
+```
+
+To reconstruct the checked-in artifacts from the historical partial-run
+outputs and verify all 48 PNG/PDF exports:
+
+```sh
+zsh scripts/sample_size/finalize_three_arm_recovery_study.sh
 ```
 
 The plotting phase creates one four-by-four faceted figure for each of eight
@@ -349,6 +364,9 @@ runs, but are not the preferred entry point for a fresh replication:
   for the asymmetric and overlap arms, using one `p_max = 2000` master loading
   matrix and 25 reps.
 - `run_lambda5_sensitivity_asym_overlap.sh`: superseded five-replication pilot.
+- `assemble_three_arm_recovery_results.R` and
+  `finalize_three_arm_recovery_study.sh`: provenance-preserving assembly and
+  final paper-figure export for those historical pieces.
 
 The full launcher should be used for a clean study because it guarantees that
 all nested `p` subsets in an arm come from the same `p_max = 2000` loading
