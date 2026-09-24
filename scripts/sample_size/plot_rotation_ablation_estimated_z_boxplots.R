@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 
-# Paper-ready n/p/H/G panels for the estimated-Z rotation ablation.
+# Paper-ready n/p/H/G panels for estimated probit-signal recovery.
 
 options(stringsAsFactors = FALSE)
 
@@ -20,18 +20,6 @@ arm_titles <- c(
   asymmetric_pi = "Asymmetric mixture weights",
   moderate_overlap = "Moderate component overlap"
 )
-method_levels <- c("fastica_only", "mixture_fastica_start", "mixture_identity_start")
-method_labels <- c(
-  fastica_only = "FastICA",
-  mixture_fastica_start = "FastICA + Mixture",
-  mixture_identity_start = "Identity + Mixture"
-)
-method_colors <- c(
-  "FastICA" = "#C43C4A",
-  "FastICA + Mixture" = "#2E7D5B",
-  "Identity + Mixture" = "#2F6DAE"
-)
-
 diagnostic_root <- file.path(repo_root, "results", "diagnostics")
 plot_dir <- file.path(
   repo_root, "results", "selected_plots", "sample_size",
@@ -52,40 +40,36 @@ read_arm <- function(arm) {
 }
 
 make_panel_plot <- function(data, arm) {
-  data <- data[
-    data$mixture_scenario == arm &
-      data$signal_source == "estimated_Z" &
-      data$stage == "refined" &
-      data$rotation_method %in% method_levels,
-    , drop = FALSE
-  ]
-  if (!nrow(data)) stop("No estimated-Z refined rows for arm: ", arm, call. = FALSE)
-
-  data$method <- factor(
-    method_labels[data$rotation_method],
-    levels = unname(method_labels[method_levels])
+  data <- data[data$mixture_scenario == arm, , drop = FALSE]
+  dataset_cols <- c(
+    "mixture_scenario", "n", "p", "H", "G_config", "rep",
+    "estimated_vs_oracle_signal_rmse"
   )
+  data <- unique(data[dataset_cols])
+  if (!nrow(data)) stop("No estimated-Z signal diagnostics for arm: ", arm, call. = FALSE)
+
   data$n_label <- factor(data$n, levels = sort(unique(data$n)), labels = paste0("n=", sort(unique(data$n))))
   data$p_label <- factor(data$p, levels = sort(unique(data$p)), labels = paste0("p=", sort(unique(data$p))))
   data$G <- as.integer(sub("-.*$", "", data$G_config))
   hg_levels <- c("H=5, G=2", "H=5, G=3", "H=10, G=2", "H=10, G=3")
   data$HG <- factor(paste0("H=", data$H, ", G=", data$G), levels = hg_levels)
 
-  ggplot2::ggplot(data, ggplot2::aes(x = n_label, y = factor_score_rmse, fill = method)) +
+  ggplot2::ggplot(data, ggplot2::aes(x = n_label, y = estimated_vs_oracle_signal_rmse)) +
     ggplot2::geom_boxplot(
-      position = ggplot2::position_dodge2(width = 0.82, preserve = "single"),
-      width = 0.72,
-      linewidth = 0.45,
-      outlier.size = 1.15,
-      outlier.alpha = 0.55
+      width = 0.58,
+      linewidth = 0.55,
+      color = "#245B8A",
+      fill = "#79A7D3",
+      alpha = 0.82,
+      outlier.color = "#245B8A",
+      outlier.size = 1.35,
+      outlier.alpha = 0.65
     ) +
     ggplot2::facet_grid(rows = ggplot2::vars(HG), cols = ggplot2::vars(p_label), scales = "free_y") +
-    ggplot2::scale_fill_manual(values = method_colors, drop = FALSE) +
     ggplot2::labs(
-      title = paste0("Estimated-Z Rotation Ablation: ", arm_titles[[arm]]),
+      title = paste0("Estimated Probit Signal Recovery: ", arm_titles[[arm]]),
       x = "Sample size",
-      y = "Post-refinement factor score RMSE",
-      fill = NULL
+      y = "Estimated-vs-oracle signal RMSE"
     ) +
     ggplot2::theme_bw(base_size = 15) +
     ggplot2::theme(
@@ -98,9 +82,6 @@ make_panel_plot <- function(data, arm) {
       strip.background = ggplot2::element_rect(fill = "#E6E6E6", color = "#555555", linewidth = 0.5),
       panel.grid.minor = ggplot2::element_blank(),
       panel.grid.major = ggplot2::element_line(color = "#E8E8E8", linewidth = 0.4),
-      legend.position = "bottom",
-      legend.text = ggplot2::element_text(size = 14),
-      legend.key.width = grid::unit(1.5, "lines"),
       panel.spacing = grid::unit(0.55, "lines"),
       plot.margin = ggplot2::margin(12, 15, 8, 12)
     )
@@ -110,7 +91,7 @@ results <- do.call(rbind, lapply(arms, read_arm))
 
 for (arm in arms) {
   figure <- make_panel_plot(results, arm)
-  stem <- paste0("rotation_ablation_estimated_z_factor_rmse_", arm)
+  stem <- paste0("rotation_ablation_estimated_z_signal_rmse_", arm)
   ggplot2::ggsave(
     filename = file.path(plot_dir, paste0(stem, ".png")),
     plot = figure,
