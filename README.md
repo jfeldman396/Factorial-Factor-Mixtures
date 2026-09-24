@@ -59,6 +59,9 @@ and all three mixture scenarios, and it evaluates rank selection from the
 largest eigengap of a separate overcomplete rank-15 estimated signal. Launch it
 after the recovery study with
 `scripts/sample_size/run_rotation_ablation_three_arms.sh`.
+Validate the finished run and regenerate its tracked summaries with
+`scripts/sample_size/summarize_rotation_ablation_three_arms.R`; the completed
+findings and output map are in `docs/rotation_ablation_results.md`.
 
 ## IFEval Analysis
 

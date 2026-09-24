@@ -1,0 +1,4 @@
+"mixture_scenario","observed_rows","expected_rows","unique_datasets","expected_datasets","duplicated_scientific_keys","missing_core_metrics","n_values_match","p_values_match","H_values_match","G_values_match","rep_values_match","signal_values_match","method_values_match","stage_values_match"
+"separated",14400,14400,1200,1200,0,0,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE
+"asymmetric_pi",14400,14400,1200,1200,0,0,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE
+"moderate_overlap",14400,14400,1200,1200,0,0,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE,TRUE
