@@ -1,20 +1,20 @@
 \begin{table}[t]
 \centering
-\caption{Oracle rotation ablation under asymmetric mixture weights and moderate component overlap. Entries are mean factor-score RMSE with the Monte Carlo standard deviation in parentheses, pooled over all combinations of $n\in\{100,200,400\}$, $p\in\{500,1000,1500,2000\}$, $H\in\{5,10\}$, and $G_h\in\{2,3\}$, with 25 replications per design cell ($1{,}200$ datasets per scenario). Lower values are better within each scenario.}
+\caption{Oracle rotation ablation under asymmetric mixture weights and moderate component overlap. Entries are post-refinement mean factor-score RMSE with the Monte Carlo standard deviation in parentheses, pooled over all combinations of $n\in\{100,200,400\}$, $p\in\{500,1000,1500,2000\}$, $H\in\{5,10\}$, and $G_h\in\{2,3\}$, with 25 replications per design cell ($1{,}200$ datasets per scenario). Lower values are better within each scenario.}
 \label{tab:rotation_ablation_supplement}
-\begin{tabular}{llcc}
+\begin{tabular}{llc}
 \toprule
-Mixture configuration & Rotation strategy & Before refinement & After refinement \\
+Mixture configuration & Rotation strategy & Post-refinement factor RMSE \\
 \midrule
 Asymmetric weights
-  & FastICA            & $1.406\;(0.113)$ & $0.197\;(0.150)$ \\
-  & FastICA + Mixture  & $1.401\;(0.123)$ & $\mathbf{0.117}\;(\mathbf{0.043})$ \\
-  & Identity + Mixture & $1.368\;(0.257)$ & $0.118\;(0.048)$ \\
+  & FastICA            & $0.197\;(0.150)$ \\
+  & FastICA + Mixture  & $\mathbf{0.117}\;(\mathbf{0.043})$ \\
+  & Identity + Mixture & $0.118\;(0.048)$ \\
 \addlinespace
 Moderate overlap
-  & FastICA            & $1.411\;(0.108)$ & $0.143\;(0.090)$ \\
-  & FastICA + Mixture  & $1.406\;(0.113)$ & $\mathbf{0.118}\;(\mathbf{0.028})$ \\
-  & Identity + Mixture & $1.393\;(0.271)$ & $0.124\;(0.049)$ \\
+  & FastICA            & $0.143\;(0.090)$ \\
+  & FastICA + Mixture  & $\mathbf{0.118}\;(\mathbf{0.028})$ \\
+  & Identity + Mixture & $0.124\;(0.049)$ \\
 \bottomrule
 \end{tabular}
 \end{table}

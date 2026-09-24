@@ -1,14 +1,14 @@
 \begin{table}[t]
 \centering
-\caption{Oracle rotation ablation under the well-separated mixture configuration. Entries are mean factor-score RMSE with the Monte Carlo standard deviation in parentheses, pooled over all combinations of $n\in\{100,200,400\}$, $p\in\{500,1000,1500,2000\}$, $H\in\{5,10\}$, and $G_h\in\{2,3\}$, with 25 replications per design cell ($1{,}200$ datasets). Lower values are better.}
+\caption{Oracle rotation ablation under the well-separated mixture configuration. Entries are post-refinement mean factor-score RMSE with the Monte Carlo standard deviation in parentheses, pooled over all combinations of $n\in\{100,200,400\}$, $p\in\{500,1000,1500,2000\}$, $H\in\{5,10\}$, and $G_h\in\{2,3\}$, with 25 replications per design cell ($1{,}200$ datasets). Lower values are better.}
 \label{tab:rotation_ablation_separated}
-\begin{tabular}{lcc}
+\begin{tabular}{lc}
 \toprule
-Rotation strategy & Before refinement & After refinement \\
+Rotation strategy & Post-refinement factor RMSE \\
 \midrule
-FastICA             & $1.401\;(0.114)$ & $0.124\;(0.074)$ \\
-FastICA + Mixture   & $1.405\;(0.113)$ & $\mathbf{0.109}\;(\mathbf{0.026})$ \\
-Identity + Mixture  & $1.377\;(0.273)$ & $0.118\;(0.058)$ \\
+FastICA             & $0.124\;(0.074)$ \\
+FastICA + Mixture   & $\mathbf{0.109}\;(\mathbf{0.026})$ \\
+Identity + Mixture  & $0.118\;(0.058)$ \\
 \bottomrule
 \end{tabular}
 \end{table}
