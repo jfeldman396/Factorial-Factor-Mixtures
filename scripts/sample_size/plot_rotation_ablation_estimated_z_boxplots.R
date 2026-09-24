@@ -87,6 +87,89 @@ make_panel_plot <- function(data, arm) {
     )
 }
 
+make_combined_plot <- function(data) {
+  dataset_cols <- c(
+    "mixture_scenario", "n", "p", "H", "G_config", "rep",
+    "estimated_vs_oracle_signal_rmse"
+  )
+  data <- unique(data[dataset_cols])
+  if (!nrow(data)) stop("No estimated-Z signal diagnostics found.", call. = FALSE)
+
+  n_values <- sort(unique(data$n))
+  p_values <- sort(unique(data$p))
+  data$n_label <- factor(data$n, levels = n_values, labels = paste0("n=", n_values))
+  data$p_label <- factor(data$p, levels = p_values, labels = paste0("p=", p_values))
+  data$G <- as.integer(sub("-.*$", "", data$G_config))
+  hg_levels <- c("H=5, G=2", "H=5, G=3", "H=10, G=2", "H=10, G=3")
+  data$HG <- factor(paste0("H=", data$H, ", G=", data$G), levels = hg_levels)
+  data$mixture_setting <- factor(
+    data$mixture_scenario,
+    levels = arms,
+    labels = unname(arm_titles[arms])
+  )
+
+  ggplot2::ggplot(
+    data,
+    ggplot2::aes(
+      x = n_label,
+      y = estimated_vs_oracle_signal_rmse,
+      fill = mixture_setting,
+      color = mixture_setting
+    )
+  ) +
+    ggplot2::geom_boxplot(
+      width = 0.72,
+      linewidth = 0.48,
+      alpha = 0.78,
+      outlier.size = 0.9,
+      outlier.alpha = 0.55,
+      position = ggplot2::position_dodge2(width = 0.78, preserve = "single")
+    ) +
+    ggplot2::facet_grid(
+      rows = ggplot2::vars(HG),
+      cols = ggplot2::vars(p_label),
+      scales = "free_y"
+    ) +
+    ggplot2::scale_fill_manual(
+      values = c(
+        "Separated mixtures" = "#4E79A7",
+        "Asymmetric mixture weights" = "#E15759",
+        "Moderate component overlap" = "#59A14F"
+      )
+    ) +
+    ggplot2::scale_color_manual(
+      values = c(
+        "Separated mixtures" = "#2F5F8F",
+        "Asymmetric mixture weights" = "#B83B3E",
+        "Moderate component overlap" = "#367C32"
+      )
+    ) +
+    ggplot2::labs(
+      title = "Estimated Probit Signal Recovery Across Mixture Settings",
+      x = "Sample size",
+      y = "Estimated-vs-oracle signal RMSE",
+      fill = NULL,
+      color = NULL
+    ) +
+    ggplot2::theme_bw(base_size = 15) +
+    ggplot2::theme(
+      plot.title = ggplot2::element_text(size = 20, face = "bold", hjust = 0.5, margin = ggplot2::margin(b = 12)),
+      axis.title = ggplot2::element_text(size = 17),
+      axis.text = ggplot2::element_text(size = 11.5, color = "#222222"),
+      axis.text.x = ggplot2::element_text(angle = 35, hjust = 1),
+      strip.text.x = ggplot2::element_text(size = 14, face = "bold"),
+      strip.text.y = ggplot2::element_text(size = 13, face = "bold"),
+      strip.background = ggplot2::element_rect(fill = "#E6E6E6", color = "#555555", linewidth = 0.5),
+      legend.position = "bottom",
+      legend.text = ggplot2::element_text(size = 13),
+      legend.key.width = grid::unit(1.3, "lines"),
+      panel.grid.minor = ggplot2::element_blank(),
+      panel.grid.major = ggplot2::element_line(color = "#E8E8E8", linewidth = 0.4),
+      panel.spacing = grid::unit(0.55, "lines"),
+      plot.margin = ggplot2::margin(12, 15, 8, 12)
+    )
+}
+
 results <- do.call(rbind, lapply(arms, read_arm))
 
 for (arm in arms) {
@@ -111,5 +194,26 @@ for (arm in arms) {
     bg = "white"
   )
 }
+
+combined_figure <- make_combined_plot(results)
+combined_stem <- "rotation_ablation_estimated_z_signal_rmse_three_settings"
+ggplot2::ggsave(
+  filename = file.path(plot_dir, paste0(combined_stem, ".png")),
+  plot = combined_figure,
+  width = 15.5,
+  height = 10.5,
+  units = "in",
+  dpi = 300,
+  bg = "white"
+)
+ggplot2::ggsave(
+  filename = file.path(plot_dir, paste0(combined_stem, ".pdf")),
+  plot = combined_figure,
+  width = 15.5,
+  height = 10.5,
+  units = "in",
+  device = grDevices::pdf,
+  bg = "white"
+)
 
 cat("Wrote estimated-Z rotation-ablation boxplots to:\n", plot_dir, "\n")
