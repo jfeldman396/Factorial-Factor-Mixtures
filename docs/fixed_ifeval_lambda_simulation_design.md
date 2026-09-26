@@ -103,7 +103,12 @@ The comparator is a probit-augmented independent-mixture Gibbs sampler with a
 Gaussian scale-mixture representation of the Laplace loading prior. It uses
 the same per-`n` loading penalty as Product MAP, 2000 draws, 1000 burn-in draws,
 and thinning one. Every retained draw is canonicalized before posterior
-averaging.
+averaging. Before accumulation, each retained copy is also aligned to a
+running posterior-mean loading reference by a globally optimal signed
+permutation, restricted to factors with the same component count. The same
+transformation is applied to scores, loadings, allocations, and mixture
+parameters, after which component means are re-sorted. This post-processing
+does not alter the Gibbs chain, and ESS is calculated from the aligned traces.
 
 The recorded production policy permits four outer Gibbs tasks and four
 workers inside each fit. Runtime tables must report this policy with wall time.
@@ -140,10 +145,25 @@ location/scale parameters are diagnostic only.
 - marginal mixture-mean RMSE;
 - marginal mixture-variance RMSE;
 - marginal mixture-weight RMSE;
+- observation-level component-profile Hamming accuracy after factor and
+  component-label alignment;
+- exact component-profile recovery, mean marginal adjusted Rand index, and
+  soft-assignment probability, Brier-score, log-loss, and entropy diagnostics;
 - stage-one signal and subspace errors for Product MAP;
 - end-to-end wall time;
 - Gibbs parameter ESS summaries;
 - convergence flags, iteration counts, and DGP support diagnostics.
+
+For Product MAP and Viroli Gibbs, component-profile Hamming accuracy is the
+mean, over observations, of the fraction of factor-wise mixture labels that
+are recovered correctly. Factor axes are first aligned by the loading-based
+evaluation permutation, then the mixture labels within each factor are
+permuted to maximize agreement with the simulated labels. The same aligned
+assignments define exact-profile accuracy and marginal adjusted Rand indices.
+Product MAP and independent-mixture Gibbs additionally report the posterior
+probability assigned to the true component, Brier score, log loss, and
+normalized assignment entropy. Hard joint-profile Gibbs assignments support
+the hard-label metrics but not these soft calibration metrics.
 
 ## Reproducibility
 
@@ -157,6 +177,19 @@ Run the complete, resumable study from the repository root:
 ```bash
 zsh scripts/sample_size/run_three_arm_recovery_study.sh
 ```
+
+Historical runs saved aggregate recovery metrics but not observation-level
+responsibilities. To reproduce the matched `p = 500, 1000` cells and add the
+component-profile metrics for Product MAP and Viroli-Laplace Gibbs, run:
+
+```bash
+zsh scripts/sample_size/run_component_profile_recovery_addendum.sh
+```
+
+This addendum retains the same three DGP arms, scientific seeds, convergence
+settings, loading penalties, and 25 replications as the main study. It writes
+to separate `*_component_profile_<arm>` result roots so the original outputs
+remain immutable.
 
 The three output roots are:
 
@@ -233,3 +266,15 @@ identity/SVD initialized mixture rotation under both estimated and oracle
 latent Gaussian responses. It records factor RMSE before and after identical
 refinement, parameter recovery, runtime, estimated-versus-oracle signal error,
 and eigengap rank diagnostics from a separate overcomplete rank-15 fit.
+The loading penalty is `3` at `n = 100` and `5` at `n in {200, 400}`, and the
+ablation uses 18 internal workers.
+
+After all three arms finish, validate coverage and create tracked compact
+tables and paper-ready PNG/PDF figures with:
+
+```bash
+Rscript scripts/sample_size/summarize_rotation_ablation_three_arms.R
+```
+
+The completed findings and output map are documented in
+`docs/rotation_ablation_results.md`.

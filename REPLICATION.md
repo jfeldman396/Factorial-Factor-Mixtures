@@ -247,6 +247,15 @@ has marginal mean zero and variance one. Product MAP is canonicalized after
 fitting, with the corresponding transformations of `alpha`, `Lambda`, and the
 mixture moments preserving the probit linear predictor. Every retained Gibbs
 draw is canonicalized by the same shared helper before posterior averaging.
+Retained Viroli draws are then aligned, without using the simulation truth, to
+a running posterior-mean loading reference. A globally optimal signed column
+assignment is solved separately among factors having the same number of
+mixture components. The resulting permutation and sign changes are applied to
+the factor scores, loadings, allocations, and mixture parameters; component
+means are then re-sorted before averaging. Alignment is post-processing only
+and does not modify the Gibbs state or transition kernel. Parameter ESS is
+computed from these aligned traces. Set `VIROLI_ALIGN_RETAINED_DRAWS=FALSE`
+only to reproduce the earlier unaligned summaries.
 
 ### Mixture Arms
 

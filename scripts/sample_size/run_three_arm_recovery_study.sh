@@ -100,6 +100,7 @@ run_arm() {
   export CANONICAL_NORMALIZE_OURS=TRUE
   export CANONICAL_MIN_SCALE="${CANONICAL_MIN_SCALE:-1e-4}"
   export VIROLI_NORMALIZE_EACH_DRAW=TRUE
+  export VIROLI_ALIGN_RETAINED_DRAWS="${VIROLI_ALIGN_RETAINED_DRAWS:-TRUE}"
   export REFINE_NORMALIZE_FACTOR_SCALE=FALSE
   export REFINE_NORMALIZE_FACTOR_LOCATION=TRUE
   export REFINE_FACTOR_SCORE_BOUND="${REFINE_FACTOR_SCORE_BOUND:-3}"
@@ -123,6 +124,7 @@ run_arm() {
     echo "G=2: pi=${g2_pi}; mean multiplier=${g2_mu_multiplier}; sd=${g2_sd}"
     echo "G=3: pi=${g3_pi}; mean multiplier=${g3_mu_multiplier}; sd=${g3_sd}"
     echo "Methods: Product MAP=${RUN_PRODUCT_MAP}; Gibbs Laplace=${RUN_VIROLI_LAPLACE}; Gibbs Gaussian=${RUN_VIROLI_GAUSSIAN}"
+    echo "Gibbs retained-draw alignment: ${VIROLI_ALIGN_RETAINED_DRAWS}"
     echo "Workers: Product outer/internal=${TASK_WORKERS_PRODUCT}/${PRODUCT_INTERNAL_WORKERS}; Gibbs outer/internal=${TASK_WORKERS_GIBBS}/${GIBBS_INTERNAL_WORKERS_PARALLEL}"
   } >> "${OUT_DIR}/replication_manifest.txt"
 

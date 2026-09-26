@@ -32,6 +32,7 @@ source(file.path(repo_root, "R", "probit_ifa_em_svd_soft_pretraining.R"))
 source(file.path(repo_root, "R", "riemannian_rotation.R"))
 source(file.path(repo_root, "R", "sample_size_dgp.R"))
 source(file.path(repo_root, "R", "canonical_factor_normalization.R"))
+source(file.path(repo_root, "R", "component_profile_recovery.R"))
 source(file.path(repo_root, "R", "viroli_probit_independent_gibbs.R"))
 
 get_env <- function(name, default, FUN = identity) {
@@ -374,6 +375,7 @@ viroli_lambda_l1_penalty <- get_env("VIROLI_LAMBDA_L1_PENALTY", 0, as.numeric)
 viroli_method_name <- get_env("VIROLI_METHOD_NAME", "viroli_independent_factor_gibbs", as.character)
 viroli_alpha_dirichlet <- get_env("VIROLI_ALPHA_DIRICHLET", 1, as.numeric)
 viroli_normalize_each_draw <- get_env("VIROLI_NORMALIZE_EACH_DRAW", TRUE, as.logical)
+viroli_align_retained_draws <- get_env("VIROLI_ALIGN_RETAINED_DRAWS", TRUE, as.logical)
 viroli_min_scale <- get_env("VIROLI_MIN_SCALE", mfa_min_scale, as.numeric)
 canonical_min_scale <- get_env("CANONICAL_MIN_SCALE", viroli_min_scale, as.numeric)
 viroli_compute_parameter_ess <- get_env("VIROLI_COMPUTE_PARAMETER_ESS", mfa_compute_parameter_ess, as.logical)
@@ -1820,7 +1822,9 @@ evaluate_fit <- function(
     alpha_hat = NULL,
     alpha_raw_hat = NULL,
     C_hat = NULL,
-    mixture_fits = NULL) {
+    mixture_fits = NULL,
+    component_responsibilities = NULL,
+    component_profile_mode = NULL) {
   align <- choose_alignment(sim$Lambda, Lambda_hat, sim$F, F_hat)
   Lambda_aligned <- align_lambda_to_truth(sim$Lambda, Lambda_hat, align)
   true_alpha <- if (!is.null(sim$alpha)) sim$alpha else rep(0, nrow(sim$Lambda))
@@ -1843,10 +1847,92 @@ evaluate_fit <- function(
   }
   prob_rmse <- sqrt(mean((pnorm(true_eta) - pnorm(eta_hat))^2))
 
+  cluster_recovery <- if (!is.null(component_responsibilities)) {
+    component_profile_recovery(
+      true_component = sim$component,
+      estimated_responsibilities = component_responsibilities,
+      estimated_factor_index = align$est_index,
+      estimated_component = component_profile_mode
+    )
+  } else if (!is.null(mixture_fits)) {
+    responsibilities <- lapply(seq_len(ncol(F_hat)), function(h) {
+      mixture_responsibilities(F_hat[, h], mixture_fits[[h]])
+    })
+    component_profile_recovery(
+      true_component = sim$component,
+      estimated_responsibilities = responsibilities,
+      estimated_factor_index = align$est_index
+    )
+  } else if (!is.null(C_hat)) {
+    profile_grid <- joint_profile_grid(length(G), G)
+    component_profile_recovery(
+      true_component = sim$component,
+      estimated_responsibilities = NULL,
+      estimated_factor_index = align$est_index,
+      estimated_component = as.matrix(profile_grid[C_hat, , drop = FALSE])
+    )
+  } else {
+    component_profile_recovery(
+      true_component = sim$component,
+      estimated_responsibilities = NULL,
+      estimated_factor_index = align$est_index
+    )
+  }
+
+  # For Gibbs, compare allocation-based posterior summaries with the historical
+  # plug-in approach based on posterior-mean factors and mixture parameters.
+  # These are different estimators and should not share a single label.
+  posterior_mean_cluster_recovery <- component_profile_recovery(
+    true_component = sim$component,
+    estimated_responsibilities = NULL,
+    estimated_factor_index = align$est_index
+  )
+  posterior_mean_joint_ari <- NA_real_
+  if (!is.null(component_responsibilities) && !is.null(mixture_fits)) {
+    posterior_mean_responsibilities <- lapply(seq_len(ncol(F_hat)), function(h) {
+      mixture_responsibilities(F_hat[, h], mixture_fits[[h]])
+    })
+    posterior_mean_cluster_recovery <- component_profile_recovery(
+      true_component = sim$component,
+      estimated_responsibilities = posterior_mean_responsibilities,
+      estimated_factor_index = align$est_index
+    )
+    if (is.finite(prod(as.numeric(G))) &&
+        prod(as.numeric(G)) <= max_joint_profile_ari_K) {
+      posterior_mean_class <- sapply(
+        posterior_mean_responsibilities,
+        max.col,
+        ties.method = "first"
+      )
+      if (length(G) == 1L) posterior_mean_class <- matrix(posterior_mean_class, ncol = 1L)
+      posterior_mean_class <- posterior_mean_class[, align$est_index, drop = FALSE]
+      posterior_mean_joint_ari <- adjusted_rand_index(
+        joint_class_index(sim$component, G),
+        joint_class_index(posterior_mean_class, G)
+      )
+    }
+  }
+  posterior_mean_names <- paste0("posterior_mean_", names(posterior_mean_cluster_recovery))
+  posterior_mean_names[posterior_mean_names == "posterior_mean_mean_component_ari"] <-
+    "posterior_mean_component_ari"
+  posterior_mean_names[posterior_mean_names == "posterior_mean_mean_true_component_probability"] <-
+    "posterior_mean_true_component_probability"
+  posterior_mean_names[posterior_mean_names == "posterior_mean_mean_component_entropy"] <-
+    "posterior_mean_component_entropy"
+  names(posterior_mean_cluster_recovery) <- posterior_mean_names
+
   K_profile <- prod(as.numeric(G))
   if (is.finite(K_profile) && K_profile <= max_joint_profile_ari_K) {
     true_joint <- joint_class_index(sim$component, G)
-    if (!is.null(C_hat)) {
+    if (!is.null(component_profile_mode)) {
+      class_hat <- as.matrix(component_profile_mode)[, align$est_index, drop = FALSE]
+      joint_ari <- adjusted_rand_index(true_joint, joint_class_index(class_hat, G))
+    } else if (!is.null(component_responsibilities)) {
+      class_hat <- sapply(component_responsibilities, max.col, ties.method = "first")
+      if (length(G) == 1L) class_hat <- matrix(class_hat, ncol = 1L)
+      class_hat <- class_hat[, align$est_index, drop = FALSE]
+      joint_ari <- adjusted_rand_index(true_joint, joint_class_index(class_hat, G))
+    } else if (!is.null(C_hat)) {
       joint_ari <- adjusted_rand_index(true_joint, C_hat)
     } else if (!is.null(mixture_fits)) {
       class_hat <- class_map_from_mixtures_local(F_hat, mixture_fits)
@@ -1858,24 +1944,29 @@ evaluate_fit <- function(
     joint_ari <- NA_real_
   }
 
-  data.frame(
-    method = method,
-    alignment_mode = alignment_mode,
-    mean_factor_abs_cor = align$mean_abs_cor,
-    mean_loading_abs_cor = if (!is.null(align$mean_loading_abs_cor)) align$mean_loading_abs_cor else NA_real_,
-    min_factor_abs_cor = min(align$matched_abs_cor),
-    factor_score_rmse = factor_score_rmse,
-    factor_score_raw_rmse = factor_score_raw_rmse,
-    lambda_corr = suppressWarnings(cor(as.vector(sim$Lambda), as.vector(Lambda_aligned))),
-    lambda_rmse = sqrt(mean((sim$Lambda - Lambda_aligned)^2)),
-    alpha_corr = safe_cor(true_alpha, alpha_hat),
-    alpha_rmse = sqrt(mean((true_alpha - alpha_hat)^2)),
-    alpha_raw_corr = safe_cor(true_alpha, alpha_raw_hat),
-    alpha_raw_rmse = alpha_raw_rmse,
-    probability_rmse = prob_rmse,
-    joint_profile_ari = joint_ari,
-    seconds = seconds,
-    stringsAsFactors = FALSE
+  cbind(
+    data.frame(
+      method = method,
+      alignment_mode = alignment_mode,
+      mean_factor_abs_cor = align$mean_abs_cor,
+      mean_loading_abs_cor = if (!is.null(align$mean_loading_abs_cor)) align$mean_loading_abs_cor else NA_real_,
+      min_factor_abs_cor = min(align$matched_abs_cor),
+      factor_score_rmse = factor_score_rmse,
+      factor_score_raw_rmse = factor_score_raw_rmse,
+      lambda_corr = suppressWarnings(cor(as.vector(sim$Lambda), as.vector(Lambda_aligned))),
+      lambda_rmse = sqrt(mean((sim$Lambda - Lambda_aligned)^2)),
+      alpha_corr = safe_cor(true_alpha, alpha_hat),
+      alpha_rmse = sqrt(mean((true_alpha - alpha_hat)^2)),
+      alpha_raw_corr = safe_cor(true_alpha, alpha_raw_hat),
+      alpha_raw_rmse = alpha_raw_rmse,
+      probability_rmse = prob_rmse,
+      joint_profile_ari = joint_ari,
+      posterior_mean_joint_profile_ari = posterior_mean_joint_ari,
+      seconds = seconds,
+      stringsAsFactors = FALSE
+    ),
+    cluster_recovery,
+    posterior_mean_cluster_recovery
   )
 }
 
@@ -2692,6 +2783,7 @@ for (row_idx in seq_len(nrow(design_grid))) {
       parallel = parallel_gibbs,
       workers = parallel_workers,
       compute_parameter_ess = viroli_compute_parameter_ess,
+      align_retained_draws = viroli_align_retained_draws,
       seed = if (is.finite(viroli_seed_override)) as.integer(viroli_seed_override) else seed + 37L,
       verbose = viroli_verbose
     )
@@ -2703,7 +2795,9 @@ for (row_idx in seq_len(nrow(design_grid))) {
       Lambda_hat = viroli$Lambda_hat,
       seconds = viroli$seconds,
       alpha_hat = viroli$alpha_hat,
-      mixture_fits = viroli$mixture_fits
+      mixture_fits = viroli$mixture_fits,
+      component_responsibilities = viroli$component_probabilities,
+      component_profile_mode = viroli$component_profile_mode
     )
     viroli_align <- choose_alignment(sim$Lambda, viroli$Lambda_hat, sim$F, viroli$F_hat)
     viroli_lambda_aligned <- align_lambda_to_truth(sim$Lambda, viroli$Lambda_hat, viroli_align)
@@ -2786,6 +2880,14 @@ for (row_idx in seq_len(nrow(design_grid))) {
       viroli_lambda_l1_penalty = viroli_lambda_l1_penalty,
       viroli_loading_prior = viroli$loading_prior,
       viroli_normalize_each_draw = viroli_normalize_each_draw,
+      viroli_align_retained_draws = viroli$align_retained_draws,
+      viroli_alignment_reference = viroli$draw_alignment$reference,
+      viroli_alignment_fraction_permuted = viroli$draw_alignment$fraction_with_permutation,
+      viroli_alignment_fraction_sign_flipped = viroli$draw_alignment$fraction_with_sign_flip,
+      viroli_alignment_total_permuted_factors = viroli$draw_alignment$total_permuted_factors,
+      viroli_alignment_total_sign_flips = viroli$draw_alignment$total_sign_flips,
+      viroli_alignment_mean_cost = viroli$draw_alignment$mean_cost,
+      viroli_alignment_median_cost = viroli$draw_alignment$median_cost,
       viroli_min_scale = viroli_min_scale,
       canonical_min_scale = canonical_min_scale,
       min_mixture_var = min_mixture_var,
@@ -2851,7 +2953,23 @@ summarize_results <- function(results) {
     "alpha_corr", "alpha_rmse", "alpha_raw_corr", "alpha_raw_rmse",
     "marginal_mu_rmse", "marginal_var_rmse", "marginal_weight_rmse",
     "marginal_mu_corr", "marginal_log_var_corr", "marginal_weight_corr",
-    "probability_rmse", "joint_profile_ari", "joint_mu_rmse", "joint_var_rmse",
+    "probability_rmse", "joint_profile_ari",
+    "component_profile_hamming_accuracy", "component_profile_hamming_median",
+    "component_profile_hamming_p10", "component_profile_exact_accuracy",
+    "mean_component_ari", "min_component_ari",
+    "mean_true_component_probability", "component_brier_score",
+    "component_log_loss", "mean_component_entropy",
+    "posterior_mean_joint_profile_ari",
+    "posterior_mean_component_profile_hamming_accuracy",
+    "posterior_mean_component_profile_hamming_median",
+    "posterior_mean_component_profile_hamming_p10",
+    "posterior_mean_component_profile_exact_accuracy",
+    "posterior_mean_component_ari", "posterior_mean_min_component_ari",
+    "posterior_mean_true_component_probability",
+    "posterior_mean_component_brier_score",
+    "posterior_mean_component_log_loss",
+    "posterior_mean_component_entropy",
+    "joint_mu_rmse", "joint_var_rmse",
     "joint_mu_corr", "joint_var_corr", "joint_weight_corr", "joint_weight_rmse",
     "joint_weight_l1",
     "flat_parameter_corr", "all_parameter_corr", "all_parameter_corr_raw",
@@ -2872,6 +2990,9 @@ summarize_results <- function(results) {
     "stage1_estimated_rank", "stage1_full_loglik_per_response",
     "stage1_true_sv_H", "stage1_true_sv_Hplus1", "stage1_fit_sv_H",
     "stage1_fit_sv_Hplus1", "stage1_fit_sv_H_to_Hplus1_ratio",
+    "viroli_alignment_fraction_permuted", "viroli_alignment_fraction_sign_flipped",
+    "viroli_alignment_total_permuted_factors", "viroli_alignment_total_sign_flips",
+    "viroli_alignment_mean_cost", "viroli_alignment_median_cost",
     "seconds"
   )
   character_cols <- intersect(c("flat_parameter_blocks", "all_parameter_blocks"), names(results))

@@ -171,6 +171,14 @@ metrics <- c(
   marginal_mu_rmse = "Mixture mean RMSE",
   marginal_var_rmse = "Mixture variance RMSE",
   marginal_weight_rmse = "Mixture weight RMSE",
+  component_profile_hamming_accuracy = "Component-profile Hamming accuracy",
+  component_profile_exact_accuracy = "Exact component-profile accuracy",
+  mean_component_ari = "Mean component ARI",
+  min_component_ari = "Minimum component ARI",
+  mean_true_component_probability = "Mean probability on true component",
+  component_brier_score = "Component Brier score",
+  component_log_loss = "Component log loss",
+  mean_component_entropy = "Mean component entropy",
   seconds = "Runtime seconds"
 )
 metrics <- metrics[names(metrics) %in% names(results)]

@@ -417,6 +417,172 @@ sort_viroli_components <- function(C, pi_mat, mu_mat, sig2_mat, G) {
   list(C = C, pi = pi_mat, mu = mu_mat, sig2 = sig2_mat)
 }
 
+viroli_component_profile_id <- function(C, G) {
+  C <- as.matrix(C)
+  G <- as.integer(G)
+  if (ncol(C) != length(G)) stop("C and G must have compatible dimensions.")
+  profile_id <- rep(1L, nrow(C))
+  multiplier <- 1L
+  for (h in seq_along(G)) {
+    if (any(!is.finite(C[, h])) || any(C[, h] < 1L | C[, h] > G[h])) {
+      stop("Component allocations must lie between 1 and G[h].")
+    }
+    profile_id <- profile_id + (as.integer(C[, h]) - 1L) * multiplier
+    multiplier <- multiplier * G[h]
+  }
+  profile_id
+}
+
+viroli_component_profile_from_id <- function(profile_id, G) {
+  profile_id <- as.integer(profile_id)
+  G <- as.integer(G)
+  out <- matrix(NA_integer_, length(profile_id), length(G))
+  remainder <- profile_id - 1L
+  for (h in seq_along(G)) {
+    out[, h] <- (remainder %% G[h]) + 1L
+    remainder <- remainder %/% G[h]
+  }
+  out
+}
+
+viroli_finalize_component_posterior <- function(
+    component_counts,
+    profile_trace,
+    G,
+    n_keep) {
+  G <- as.integer(G)
+  H <- length(G)
+  if (n_keep < 1L) stop("At least one retained allocation draw is required.")
+
+  probabilities <- lapply(seq_len(H), function(h) {
+    component_counts[[h]] / n_keep
+  })
+  marginal_mode <- do.call(cbind, lapply(probabilities, function(probability) {
+    max.col(probability, ties.method = "first")
+  }))
+
+  retained_profiles <- profile_trace[, seq_len(n_keep), drop = FALSE]
+  modal <- t(apply(retained_profiles, 1L, function(profile_draws) {
+    frequency <- table(profile_draws)
+    winner <- which.max(frequency)
+    c(
+      profile_id = as.integer(names(frequency)[winner]),
+      probability = as.numeric(frequency[winner]) / n_keep
+    )
+  }))
+  profile_mode <- viroli_component_profile_from_id(modal[, "profile_id"], G)
+
+  list(
+    probabilities = probabilities,
+    marginal_mode = marginal_mode,
+    profile_mode = profile_mode,
+    profile_mode_id = as.integer(modal[, "profile_id"]),
+    profile_mode_probability = as.numeric(modal[, "probability"])
+  )
+}
+
+viroli_match_loading_columns <- function(reference_Lambda, Lambda, G) {
+  reference_Lambda <- as.matrix(reference_Lambda)
+  Lambda <- as.matrix(Lambda)
+  if (!identical(dim(reference_Lambda), dim(Lambda))) {
+    stop("reference_Lambda and Lambda must have identical dimensions.")
+  }
+  if (any(!is.finite(reference_Lambda)) || any(!is.finite(Lambda))) {
+    stop("reference_Lambda and Lambda must contain only finite values.")
+  }
+  H <- ncol(Lambda)
+  G <- normalize_G_fixed(G, H)
+  if (!requireNamespace("clue", quietly = TRUE)) {
+    stop("Package 'clue' is required to align retained Gibbs draws.")
+  }
+
+  current_index <- integer(H)
+  signs <- rep(1, H)
+  matched_cost <- rep(NA_real_, H)
+
+  # Factors with different component counts are not exchangeable. Solve one
+  # signed assignment problem within each equal-G block.
+  for (Gh in unique(G)) {
+    idx <- which(G == Gh)
+    m <- length(idx)
+    cost <- matrix(0, m, m)
+    sign_mat <- matrix(1, m, m)
+    for (r in seq_len(m)) {
+      reference_column <- reference_Lambda[, idx[r]]
+      for (s in seq_len(m)) {
+        current_column <- Lambda[, idx[s]]
+        positive_cost <- sum((reference_column - current_column)^2)
+        negative_cost <- sum((reference_column + current_column)^2)
+        if (negative_cost < positive_cost) {
+          cost[r, s] <- negative_cost
+          sign_mat[r, s] <- -1
+        } else {
+          cost[r, s] <- positive_cost
+        }
+      }
+    }
+    assignment <- as.integer(clue::solve_LSAP(cost))
+    current_index[idx] <- idx[assignment]
+    signs[idx] <- sign_mat[cbind(seq_len(m), assignment)]
+    matched_cost[idx] <- cost[cbind(seq_len(m), assignment)]
+  }
+
+  list(
+    current_index = current_index,
+    signs = signs,
+    matched_cost = matched_cost,
+    total_cost = sum(matched_cost),
+    n_permuted_factors = sum(current_index != seq_len(H)),
+    n_sign_flips = sum(signs < 0)
+  )
+}
+
+align_viroli_draw_to_reference <- function(
+    reference_Lambda,
+    F,
+    Lambda,
+    C,
+    pi_mat,
+    mu_mat,
+    sig2_mat,
+    G) {
+  F <- as.matrix(F)
+  Lambda <- as.matrix(Lambda)
+  C <- as.matrix(C)
+  H <- ncol(Lambda)
+  G <- normalize_G_fixed(G, H)
+  alignment <- viroli_match_loading_columns(reference_Lambda, Lambda, G)
+  current_index <- alignment$current_index
+  signs <- alignment$signs
+
+  F_aligned <- sweep(F[, current_index, drop = FALSE], 2L, signs, "*")
+  Lambda_aligned <- sweep(Lambda[, current_index, drop = FALSE], 2L, signs, "*")
+  C_aligned <- C[, current_index, drop = FALSE]
+  pi_aligned <- pi_mat[current_index, , drop = FALSE]
+  mu_aligned <- sweep(mu_mat[current_index, , drop = FALSE], 1L, signs, "*")
+  sig2_aligned <- sig2_mat[current_index, , drop = FALSE]
+
+  # A sign reversal reverses the component-mean ordering. Restore the common
+  # increasing-mean convention and relabel the allocations accordingly.
+  sorted <- sort_viroli_components(
+    C = C_aligned,
+    pi_mat = pi_aligned,
+    mu_mat = mu_aligned,
+    sig2_mat = sig2_aligned,
+    G = G
+  )
+
+  list(
+    F = F_aligned,
+    Lambda = Lambda_aligned,
+    C = sorted$C,
+    pi = sorted$pi,
+    mu = sorted$mu,
+    sig2 = sorted$sig2,
+    alignment = alignment
+  )
+}
+
 viroli_require_canonical_normalizer <- function() {
   if (exists("canonical_normalize_factor_parameters", mode = "function")) {
     return(invisible(TRUE))
@@ -1014,6 +1180,7 @@ fit_viroli_probit_independent_gibbs <- function(
     parallel = FALSE,
     workers = NULL,
     compute_parameter_ess = TRUE,
+    align_retained_draws = TRUE,
     initial_state = NULL,
     initial_allocation = c("sample", "map"),
     seed = 1L,
@@ -1062,7 +1229,17 @@ fit_viroli_probit_independent_gibbs <- function(
   keep_pi <- matrix(0, H, G_max)
   keep_mu <- matrix(0, H, G_max)
   keep_sig2 <- matrix(0, H, G_max)
+  keep_component_counts <- lapply(seq_len(H), function(h) {
+    matrix(0L, n, G[h])
+  })
+  keep_profile_trace <- matrix(NA_integer_, n, keep_target)
   n_keep <- 0L
+  alignment_reference_Lambda <- NULL
+  last_aligned_C <- C
+  alignment_draws_with_permutation <- 0L
+  alignment_draws_with_sign_flip <- 0L
+  alignment_total_permuted_factors <- 0L
+  alignment_total_sign_flips <- 0L
   if (isTRUE(compute_parameter_ess) && keep_target > 0L) {
     alpha_trace <- matrix(NA_real_, keep_target, p)
     colnames(alpha_trace) <- paste0("alpha_", seq_len(p))
@@ -1090,6 +1267,9 @@ fit_viroli_probit_independent_gibbs <- function(
     mixture_parameter_seconds = NA_real_,
     regression_seconds = NA_real_,
     normalization_seconds = NA_real_,
+    retained_draw_permuted_factors = NA_integer_,
+    retained_draw_sign_flips = NA_integer_,
+    retained_draw_alignment_cost = NA_real_,
     keep_draw_seconds = NA_real_,
     iteration_seconds = NA_real_
   )
@@ -1199,19 +1379,68 @@ fit_viroli_probit_independent_gibbs <- function(
 
     keep_start <- Sys.time()
     if (iter > burn && ((iter - burn) %% thin == 0L)) {
-      keep_F <- keep_F + F
+      retained <- list(
+        F = F,
+        Lambda = Lambda,
+        C = C,
+        pi = pi_mat,
+        mu = mu_mat,
+        sig2 = sig2_mat
+      )
+      if (isTRUE(align_retained_draws)) {
+        if (is.null(alignment_reference_Lambda)) {
+          alignment_reference_Lambda <- Lambda
+          retained$alignment <- list(
+            n_permuted_factors = 0L,
+            n_sign_flips = 0L,
+            total_cost = 0
+          )
+        } else {
+          retained <- align_viroli_draw_to_reference(
+            reference_Lambda = alignment_reference_Lambda,
+            F = F,
+            Lambda = Lambda,
+            C = C,
+            pi_mat = pi_mat,
+            mu_mat = mu_mat,
+            sig2_mat = sig2_mat,
+            G = G
+          )
+        }
+        n_permuted <- retained$alignment$n_permuted_factors
+        n_sign_flips <- retained$alignment$n_sign_flips
+        history$retained_draw_permuted_factors[iter] <- n_permuted
+        history$retained_draw_sign_flips[iter] <- n_sign_flips
+        history$retained_draw_alignment_cost[iter] <- retained$alignment$total_cost
+        alignment_draws_with_permutation <- alignment_draws_with_permutation + as.integer(n_permuted > 0L)
+        alignment_draws_with_sign_flip <- alignment_draws_with_sign_flip + as.integer(n_sign_flips > 0L)
+        alignment_total_permuted_factors <- alignment_total_permuted_factors + n_permuted
+        alignment_total_sign_flips <- alignment_total_sign_flips + n_sign_flips
+      }
+
+      keep_F <- keep_F + retained$F
       keep_alpha <- keep_alpha + alpha
-      keep_Lambda <- keep_Lambda + Lambda
-      keep_pi <- keep_pi + replace(pi_mat, is.na(pi_mat), 0)
-      keep_mu <- keep_mu + replace(mu_mat, is.na(mu_mat), 0)
-      keep_sig2 <- keep_sig2 + replace(sig2_mat, is.na(sig2_mat), 0)
+      keep_Lambda <- keep_Lambda + retained$Lambda
+      keep_pi <- keep_pi + replace(retained$pi, is.na(retained$pi), 0)
+      keep_mu <- keep_mu + replace(retained$mu, is.na(retained$mu), 0)
+      keep_sig2 <- keep_sig2 + replace(retained$sig2, is.na(retained$sig2), 0)
       n_keep <- n_keep + 1L
+      last_aligned_C <- retained$C
+      for (h in seq_len(H)) {
+        allocation_index <- cbind(seq_len(n), retained$C[, h])
+        keep_component_counts[[h]][allocation_index] <-
+          keep_component_counts[[h]][allocation_index] + 1L
+      }
+      keep_profile_trace[, n_keep] <- viroli_component_profile_id(retained$C, G)
+      if (isTRUE(align_retained_draws)) {
+        alignment_reference_Lambda <- keep_Lambda / n_keep
+      }
       if (isTRUE(compute_parameter_ess) && n_keep <= keep_target) {
         alpha_trace[n_keep, ] <- alpha
-        lambda_trace[n_keep, ] <- as.numeric(Lambda)
-        pi_trace[n_keep, ] <- as.numeric(pi_mat)
-        mu_trace[n_keep, ] <- as.numeric(mu_mat)
-        sig2_trace[n_keep, ] <- as.numeric(sig2_mat)
+        lambda_trace[n_keep, ] <- as.numeric(retained$Lambda)
+        pi_trace[n_keep, ] <- as.numeric(retained$pi)
+        mu_trace[n_keep, ] <- as.numeric(retained$mu)
+        sig2_trace[n_keep, ] <- as.numeric(retained$sig2)
       }
     }
     history$keep_draw_seconds[iter] <- as.numeric(difftime(Sys.time(), keep_start, units = "secs"))
@@ -1279,6 +1508,28 @@ fit_viroli_probit_independent_gibbs <- function(
     sig2_hat <- posterior_mean_normalized$sig2
   }
 
+  if (n_keep > 0L) {
+    component_posterior <- viroli_finalize_component_posterior(
+      component_counts = keep_component_counts,
+      profile_trace = keep_profile_trace,
+      G = G,
+      n_keep = n_keep
+    )
+  } else {
+    component_probabilities <- lapply(seq_len(H), function(h) {
+      probability <- matrix(0, n, G[h])
+      probability[cbind(seq_len(n), C[, h])] <- 1
+      probability
+    })
+    component_posterior <- list(
+      probabilities = component_probabilities,
+      marginal_mode = C,
+      profile_mode = C,
+      profile_mode_id = viroli_component_profile_id(C, G),
+      profile_mode_probability = rep(1, n)
+    )
+  }
+
   mixture_fits <- lapply(seq_len(H), function(h) {
     Gh <- G[h]
     list(
@@ -1290,11 +1541,39 @@ fit_viroli_probit_independent_gibbs <- function(
     )
   })
 
+  draw_alignment <- list(
+    enabled = isTRUE(align_retained_draws),
+    reference = if (isTRUE(align_retained_draws)) "running_posterior_mean_loadings" else "none",
+    n_draws = n_keep,
+    draws_with_permutation = alignment_draws_with_permutation,
+    draws_with_sign_flip = alignment_draws_with_sign_flip,
+    fraction_with_permutation = if (n_keep > 0L) alignment_draws_with_permutation / n_keep else NA_real_,
+    fraction_with_sign_flip = if (n_keep > 0L) alignment_draws_with_sign_flip / n_keep else NA_real_,
+    total_permuted_factors = alignment_total_permuted_factors,
+    total_sign_flips = alignment_total_sign_flips,
+    mean_cost = if (any(is.finite(history$retained_draw_alignment_cost))) {
+      mean(history$retained_draw_alignment_cost, na.rm = TRUE)
+    } else {
+      NA_real_
+    },
+    median_cost = if (any(is.finite(history$retained_draw_alignment_cost))) {
+      stats::median(history$retained_draw_alignment_cost, na.rm = TRUE)
+    } else {
+      NA_real_
+    }
+  )
+
   list(
     F_hat = F_hat,
     alpha_hat = alpha_hat,
     Lambda_hat = Lambda_hat,
-    C = C,
+    C = component_posterior$profile_mode,
+    C_last_draw = if (n_keep > 0L && isTRUE(align_retained_draws)) last_aligned_C else C,
+    component_probabilities = component_posterior$probabilities,
+    component_marginal_mode = component_posterior$marginal_mode,
+    component_profile_mode = component_posterior$profile_mode,
+    component_profile_mode_id = component_posterior$profile_mode_id,
+    component_profile_mode_probability = component_posterior$profile_mode_probability,
     pi = pi_hat,
     mu = mu_hat,
     sig2 = sig2_hat,
@@ -1302,11 +1581,13 @@ fit_viroli_probit_independent_gibbs <- function(
     history = history,
     ess_table = ess_table,
     ess_summary = ess_summary,
+    draw_alignment = draw_alignment,
     n_keep = n_keep,
     G = G,
     initialization = initialization,
     initial_allocation = if (is.null(initial_state)) NA_character_ else initial_allocation,
     normalize_each_draw = normalize_each_draw,
+    align_retained_draws = align_retained_draws,
     lambda_l1_penalty = lambda_l1_penalty,
     loading_prior = if (isTRUE(use_laplace_loading_prior)) "bayesian_lasso_scale_mixture" else "normal",
     seconds = proc.time()[["elapsed"]] - t0,
