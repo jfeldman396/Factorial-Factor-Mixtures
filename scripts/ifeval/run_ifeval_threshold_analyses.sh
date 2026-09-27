@@ -8,7 +8,7 @@ ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 # threshold would exclude scores equal to 2/3 and would coincide with 1.0.
 THRESHOLD_LABELS=(${=THRESHOLD_LABELS:-0p5 0p67 1})
 WORKERS="${WORKERS:-18}"
-H_GRID="${H_GRID:-1:6}"
+H_GRID="${H_GRID:-2:8}"
 LAMBDA_L1_GRID="${LAMBDA_L1_GRID:-0,1,2,4,8,12}"
 OUT_BASE="${OUT_BASE:-$ROOT/results/full/ifeval_threshold_sensitivity}"
 

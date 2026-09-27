@@ -123,6 +123,10 @@ OUT_BASE=results/full/ifeval_threshold_sensitivity_current \
   zsh scripts/ifeval/run_ifeval_threshold_analyses.sh
 ```
 
+The default search uses `H = 2, ..., 8`, factor-specific component counts in
+`{1, 2, 3}` with at most one Gaussian coordinate, and loading penalties
+`{0, 1, 2, 4, 8, 12}` under three-fold response-level cross-validation.
+
 The workflow is resumable. Intermediate fits are written to `results/full/`; final analysis-ready outputs belong in `results/saved/ifeval/`, and paper artifacts belong in `results/selected_plots/ifeval/` and `results/selected_tables/ifeval/`.
 
 To export a completed run manually, use:

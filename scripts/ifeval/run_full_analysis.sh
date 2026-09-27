@@ -22,7 +22,7 @@ echo "Step 1: held-out predictive likelihood CV for mixture models"
 MATRIX_PATH="$MATRIX" \
 ITEM_METADATA_PATH="$ITEMS" \
 OUT_DIR="$CV_DIR" \
-H_GRID="${H_GRID:-1:5}" \
+H_GRID="${H_GRID:-2:8}" \
 G_MODE="${G_MODE:-column_grid}" \
 G_GRID="${G_GRID:-1,2,3}" \
 G_COMPONENT_VALUES="${G_COMPONENT_VALUES:-1,2,3}" \

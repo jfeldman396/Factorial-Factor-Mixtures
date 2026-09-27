@@ -29,6 +29,6 @@ The recovery study uses `n = {100, 200, 400}`, Product MAP `p = {500, 1000, 1500
 
 The rotation ablation compares FastICA, FastICA followed by mixture rotation, and identity initialization followed by mixture rotation under both estimated and oracle latent Gaussian signals.
 
-The IFEval study selects rank, component counts, and loading penalty by held-out predictive likelihood at strict-accuracy thresholds `0.5`, `2/3`, and `1.0`.
+The IFEval study selects rank `H = 2, ..., 8`, component counts, and loading penalty by held-out predictive likelihood at strict-accuracy thresholds `0.5`, `2/3`, and `1.0`.
 
 See [REPRODUCE.md](REPRODUCE.md) for exact commands and output locations.

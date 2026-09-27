@@ -746,6 +746,7 @@ write_cv_plots <- function(summary_scores, out_dir) {
 refresh_outputs <- function(scores_path, out_dir) {
   if (!file.exists(scores_path)) return(invisible(NULL))
   scores <- read.csv(scores_path, stringsAsFactors = FALSE)
+  scores <- filter_scores_to_requested_grid(scores)
   if (!nrow(scores)) return(invisible(NULL))
   summary_scores <- make_summary(scores)
   write.csv(summary_scores, file.path(out_dir, "ifeval_rank_lambda_cv_summary_partial.csv"),
@@ -797,7 +798,7 @@ dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
 X_full <- read_binary_matrix(matrix_path)
 max_feasible_H <- min(nrow(X_full) - 1L, ncol(X_full))
-H_grid <- parse_int_grid(Sys.getenv("H_GRID"), default = 1:min(6L, max_feasible_H))
+H_grid <- parse_int_grid(Sys.getenv("H_GRID"), default = 2:min(8L, max_feasible_H))
 H_grid <- H_grid[H_grid >= 1L & H_grid <= max_feasible_H]
 G_grid <- parse_int_grid(Sys.getenv("G_GRID"), default = c(2L, 3L))
 G_mode <- Sys.getenv("G_MODE", "fixed")
@@ -843,6 +844,16 @@ item_metadata_path <- Sys.getenv(
   file.path(repo_root, "data", "ifeval", "openeval_item_metadata.csv")
 )
 
+filter_scores_to_requested_grid <- function(scores) {
+  if (!nrow(scores)) return(scores)
+  lambda_requested <- vapply(
+    scores$lambda_l1_penalty,
+    function(value) any(abs(value - lambda_grid) < 1e-12),
+    logical(1L)
+  )
+  scores[scores$H %in% H_grid & lambda_requested, , drop = FALSE]
+}
+
 set.seed(seed)
 fold_id <- matrix(
   sample.int(K_folds, length(X_full), replace = TRUE),
@@ -858,6 +869,7 @@ existing <- if (resume_existing && file.exists(scores_path)) {
 } else {
   data.frame()
 }
+existing <- filter_scores_to_requested_grid(existing)
 
 already_done <- function(method, G, G_config, H, lambda, fold) {
   if (!resume_existing || !nrow(existing)) return(FALSE)
@@ -1007,6 +1019,7 @@ for (G in G_grid) {
 }
 
 scores <- read.csv(scores_path, stringsAsFactors = FALSE)
+scores <- filter_scores_to_requested_grid(scores)
 summary_scores <- make_summary(scores)
 write.csv(summary_scores, file.path(out_dir, "ifeval_rank_lambda_cv_summary.csv"),
           row.names = FALSE)
@@ -1014,12 +1027,10 @@ selected <- summary_scores[which.max(summary_scores$mean_heldout_loglik_per_resp
 rownames(selected) <- NULL
 write.csv(selected, file.path(out_dir, "ifeval_rank_lambda_selected_by_heldout_ll.csv"),
           row.names = FALSE)
-if (!(tolower(Sys.getenv("REFRESH_PLOTS", "TRUE")) %in% c("false", "0", "no"))) {
-  tryCatch(
-    write_cv_plots(summary_scores, out_dir),
-    error = function(e) message("Skipping final CV plots: ", conditionMessage(e))
-  )
-}
+tryCatch(
+  write_cv_plots(summary_scores, out_dir),
+  error = function(e) message("Skipping final CV plots: ", conditionMessage(e))
+)
 
 if (fit_selected_after_cv) {
   mixture_G_config <- if (!is.na(selected$G_config) && nzchar(selected$G_config)) {
