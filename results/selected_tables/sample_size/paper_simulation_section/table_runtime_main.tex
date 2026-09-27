@@ -1,0 +1,15 @@
+\begin{table}[t]
+\centering
+\caption{End-to-end computation time under the separated symmetric mixture configuration. Times are means in seconds, pooled over $n\in\{100,200,400\}$ and $p\in\{500,1000\}$, with 25 replications per design cell. Speed-up is the ratio of Gibbs time to Spectral-MAP time. ESS is the mean across replications of the median effective sample size over P-IFA parameters among the 1,000 retained Gibbs draws.}
+\label{tab:runtime_comparison}
+\begin{tabular}{ccrrrr}
+\toprule
+$H$ & $G_h$ & Spectral-MAP & Gibbs & Speed-up & Gibbs ESS \\
+\midrule
+5 & 2 & 20.1 & 161.2 & \textbf{8.0$\times$} & 163 \\
+5 & 3 & 15.9 & 161.6 & \textbf{10.2$\times$} & 180 \\
+10 & 2 & 26.8 & 218.0 & \textbf{8.1$\times$} & 159 \\
+10 & 3 & 18.9 & 218.2 & \textbf{11.6$\times$} & 163 \\
+\bottomrule
+\end{tabular}
+\end{table}

@@ -1,185 +1,34 @@
 # Factorial Factor Mixtures
 
-This repository collects the reproducible code, selected results, and writeups for factorial factor mixture analyses.
+This repository is the reproducibility release for the P-IFA paper. It contains only the code, saved results, and manuscript artifacts for:
 
-The current contents are organized around two analysis tracks:
+1. the three-setting Product MAP versus Gibbs recovery study;
+2. the FastICA/mixture-rotation ablation; and
+3. the threshold-sensitivity IFEval analysis.
 
-1. `scripts/sample_size`: simulations comparing the proposed binary probit independent-mixture factor method against Viroli-style probit Gibbs baselines.
-2. `scripts/ifeval`: IFEval rank, component-count, and sparsity selection by held-out predictive likelihood, followed by factor interpretation/visualization for the selected mixture model.
-
-The main implementation lives in `R/`. Runnable scripts are kept under `scripts/` and source the shared implementation so the simulation and IFEval analyses use the same fitting code.
-
-See `REPLICATION.md` for step-by-step instructions to rerun the IFEval
-analysis and the sample-size simulation. See `CODE_AUDIT.md` for the latest
-static audit notes and reproducibility caveats.
-
-## Current Simulation
-
-The paper-facing sample-size experiment is the fixed-DGP IFEval-like Lambda
-simulation.  It holds the population loading matrix, mixture parameters, and
-intercept design fixed within each design cell, then simulates new binary
-datasets across replications.
-
-The current grid uses:
-
-- `n in {100, 200, 400}`;
-- `p in {500, 1000, 1500, 2000}` for Product MAP;
-- `p in {500, 1000}` for the Viroli Gibbs baselines;
-- `H in {5, 10}`;
-- `G_h = 2` for every factor, or `G_h = 3` for every factor;
-- `25` Monte Carlo replications per design cell;
-- IFEval-like unbalanced primary blocks, with at least `30` primary items in
-  the smallest block;
-- primary and cross-loading magnitudes sampled from `Uniform(1, 2)`;
-- randomly signed cross-loadings with probability `0.05`;
-- mixture separation `2`;
-- Product MAP loading penalties `3` for the final `n = 100` rerun and `5` for
-  `n in {200, 400}`;
-- Viroli Laplace Gibbs using the same n-dependent loading penalty schedule;
-- optional Viroli Gaussian Gibbs with a diffuse Gaussian loading prior.
-
-The authoritative launcher is
-`scripts/sample_size/run_three_arm_recovery_study.sh`. It runs the complete
-grid for three mixture settings: separated symmetric mixtures, asymmetric
-mixture probabilities, and moderately overlapping mixtures. The shared
-loading penalty is `3` at `n = 100` and `5` at `n in {200, 400}`. Product MAP
-uses 18 internal workers; Gibbs uses four by default. Every fitted factor
-parameterization is converted to mean zero and variance one before recovery is
-scored, and Gibbs draws are canonicalized before posterior averaging.
-
-Full chunk outputs are written below `results/full/` and ignored by git.
-Presentation boxplots for all recovery metrics are written below
-`results/selected_plots/sample_size/three_mixture_settings/`, with cell means
-under `results/selected_tables/sample_size/three_mixture_settings/`.
-
-The paired rotation ablation compares FastICA only, FastICA followed by
-mixture rotation, and identity/SVD initialization followed by mixture rotation
-under both estimated and oracle latent responses. It runs across the full grid
-and all three mixture scenarios, and it evaluates rank selection from the
-largest eigengap of a separate overcomplete rank-15 estimated signal. Launch it
-after the recovery study with
-`scripts/sample_size/run_rotation_ablation_three_arms.sh`.
-Validate the finished run and regenerate its tracked summaries with
-`scripts/sample_size/summarize_rotation_ablation_three_arms.R`; the completed
-findings and output map are in `docs/rotation_ablation_results.md`.
-
-## IFEval Analysis
-
-The IFEval analysis includes:
-
-- missing-aware rank/component/penalty selection by held-out predictive likelihood
-- tuned sparse loading penalty for the mixture model
-- selected-model loading interpretation, including column-specific mixture sizes when selected by CV
-- cross-loading summaries
-- 3D factor visualizations
-- LaTeX writeup and rendered PDF in `writeup/`
-
-### IFEval Data Files
-
-The raw IFEval source is **not** a CSV in this repository.  It comes from the
-OpenEval Hugging Face dataset, `human-centered-eval/OpenEval`, where the data
-are stored as parquet shards:
+## Repository Layout
 
 ```text
-item/ifeval-00000-of-00001.parquet
-response/ifeval-00000-of-00004.parquet
-response/ifeval-00001-of-00004.parquet
-response/ifeval-00002-of-00004.parquet
-response/ifeval-00003-of-00004.parquet
+R/                         Shared estimation and evaluation functions
+scripts/sample_size/       Recovery-study and rotation-ablation entry points
+scripts/ifeval/            IFEval data, tuning, fitting, and plotting scripts
+scripts/data/              OpenEval-to-IFEval formatter
+data/                      Committed IFEval analysis matrices and metadata
+results/saved/             Analysis-ready per-replication results
+results/selected_plots/    Figures used in the paper or supplement
+results/selected_tables/   Tables used in the paper or supplement
+docs/                      Simulation design and manuscript-ready LaTeX
+tests/                     Gibbs alignment and subtype-recovery checks
 ```
 
-The item parquet contains one row per prompt.  For IFEval, the raw item payload
-contains the prompt text, the evaluator instruction ids, and instruction
-kwargs.  The response parquet files contain one row per model response, with a
-nested model descriptor and nested score object.  For this benchmark, the score
-metric is `ifeval_strict_accuracy`, interpreted as the fraction of strict
-instruction checks satisfied by that model on that prompt.
+Historical smoke tests, sensitivity detours, checkpoints, and presentation-only exports are intentionally excluded.
 
-The formatter
-[`scripts/data/format_openeval_binary_matrix.py`](scripts/data/format_openeval_binary_matrix.py)
-converts the raw parquet response shards into CSV files by:
+## Current Studies
 
-1. reading the requested OpenEval response shards;
-2. extracting `model_name`, `item_id`, score metric values, and item metadata;
-3. averaging score values within each model-item pair;
-4. coding the binary response as `1(score >= threshold)`;
-5. writing model-by-item matrices and prompt/instruction metadata.
+The recovery study uses `n = {100, 200, 400}`, Product MAP `p = {500, 1000, 1500, 2000}`, Gibbs `p = {500, 1000}`, `H = {5, 10}`, homogeneous `G_h = 2` or `G_h = 3`, and 25 replications. It evaluates separated symmetric mixtures, asymmetric weights, and moderate overlap. The loading penalty is 3 at `n = 100` and 5 at `n = {200, 400}` for both Product MAP and Laplace Gibbs.
 
-The compact committed IFEval CSVs are here:
+The rotation ablation compares FastICA, FastICA followed by mixture rotation, and identity initialization followed by mixture rotation under both estimated and oracle latent Gaussian signals.
 
-```text
-data/ifeval/openeval_ifeval_only_binary_matrix.csv
-data/ifeval/openeval_item_metadata.csv
-data/ifeval/openeval_item_instruction_metadata_long.csv
-data/ifeval/openeval_model_metadata.csv
-data/ifeval/ifeval_analysis_matrix_build_summary.csv
-```
+The IFEval study selects rank, component counts, and loading penalty by held-out predictive likelihood at strict-accuracy thresholds `0.5`, `2/3`, and `1.0`.
 
-`openeval_ifeval_only_binary_matrix.csv` is the model-by-item matrix used for
-fitting.  Rows are LLMs, columns are retained IFEval prompts, and entries are
-binary thresholded strict-accuracy scores.  The default threshold is
-`score >= 0.5`.
-
-`openeval_item_metadata.csv` is the wide item metadata table.  It includes the
-raw OpenEval item payload plus parsed columns for `prompt`, `instruction_ids`,
-`instruction_families`, `n_instructions`, `n_unique_instruction_ids`, and
-`instruction_kwargs`.
-
-`openeval_item_instruction_metadata_long.csv` is the long instruction table:
-one row per retained prompt-instruction pair.  This is the table to use when
-connecting the original IFEval instruction checks to the fitted low-rank
-factor model.
-
-The default committed matrix starts from `124` models and `541` IFEval prompts.
-After removing two low-coverage models and seven constant prompts, it contains
-`122` models and `534` retained prompts.  These `534` prompts contain `820`
-prompt-instruction rows, `25` unique instruction ids, and `9` broader
-instruction families.
-
-Threshold sensitivity versions of the same CSVs are committed in:
-
-```text
-data/ifeval_threshold_0p5/
-data/ifeval_threshold_0p67/
-data/ifeval_threshold_1/
-```
-
-The `0p67` folder uses the exact two-thirds cutoff, $2/3$, but is labeled
-`0p67` for readability.  This matters because the observed IFEval
-strict-accuracy values are `0`, `1/3`, `1/2`, `2/3`, and `1`; using a literal
-decimal threshold of `0.67` would exclude scores equal to `2/3` and would
-therefore coincide with the threshold-1.0 matrix.
-
-The retained matrix sizes differ slightly by threshold:
-
-| Folder | Strict-accuracy rule | Models | Retained prompts | Mean binary score |
-| --- | --- | ---: | ---: | ---: |
-| `data/ifeval_threshold_0p5/` | `score >= 0.5` | 122 | 534 | 0.757 |
-| `data/ifeval_threshold_0p67/` | `score >= 2/3` | 122 | 538 | 0.653 |
-| `data/ifeval_threshold_1/` | `score >= 1` | 122 | 534 | 0.619 |
-
-The current compact component-wise IFEval writeup is available as a rendered
-PDF and as source Markdown:
-
-- [Rendered IFEval component-wise PDF](writeup/ifeval_componentwise_G3313.pdf)
-- [IFEval component-wise Markdown source](writeup/ifeval_componentwise_G3313.md)
-
-It summarizes the `H = 4`, `G = (3,3,1,3)` fit, representative solo-loading
-and cross-loading items, joint LLM ability profiles, the loading heatmap,
-marginal mixture fits, and factor-score visualizations.
-
-The cleaned IFEval data used by the scripts live in `data/ifeval`.
-The exact OpenEval-to-IFEval matrix construction is documented in
-`data/ifeval/README.md` and `REPRODUCE.md`; entries are thresholded OpenEval
-numeric scores, then the IFEval analysis retains complete, nonconstant item
-columns.  The same folder includes parsed prompt and instruction metadata for
-each retained item, including a long item-instruction table for comparing the
-25 retained IFEval instruction ids to the fitted lower-rank factors.
-
-## Remote GitHub Repository
-
-The configured remote is:
-
-```sh
-https://github.com/jfeldman396/Factorial-Factor-Mixtures.git
-```
+See [REPRODUCE.md](REPRODUCE.md) for exact commands and output locations.

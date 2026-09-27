@@ -4,7 +4,8 @@ set -u
 
 export PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
-REPO_ROOT="/Users/joefeldman/Documents/Deep Factor Models/factorial-factor-mixtures"
+SCRIPT_DIR="${0:A:h}"
+REPO_ROOT="${SCRIPT_DIR:h:h}"
 RSCRIPT="${RSCRIPT:-$(command -v Rscript)}"
 cd "${REPO_ROOT}" || exit 1
 
@@ -25,7 +26,7 @@ run_arm() {
   local g3_sd="$7"
 
   export RUN_LABEL="${COMMON_LABEL_PREFIX}_${arm_label}"
-  export OUT_DIR="${REPO_ROOT}/results/diagnostics/${RUN_LABEL}"
+  export OUT_DIR="${REPO_ROOT}/results/saved/rotation_ablation/${arm_label}"
   /bin/mkdir -p "${OUT_DIR}"
 
   export RESUME_EXISTING="${RESUME_EXISTING:-TRUE}"

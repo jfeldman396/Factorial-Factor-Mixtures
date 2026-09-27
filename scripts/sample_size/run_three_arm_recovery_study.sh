@@ -17,8 +17,9 @@ cd "${REPO_ROOT}"
 RUN_LABEL_PREFIX="${RUN_LABEL_PREFIX:-fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_npenalty3_5_full}"
 ARM_FILTER="${ARM_FILTER:-separated,asymmetric_pi,moderate_overlap}"
 RUN_FITS="${RUN_FITS:-TRUE}"
-RUN_PLOTS="${RUN_PLOTS:-TRUE}"
 VALIDATE_RESULTS="${VALIDATE_RESULTS:-TRUE}"
+EXPORT_SAVED_RESULTS="${EXPORT_SAVED_RESULTS:-TRUE}"
+SAVED_RESULT_KIND="${SAVED_RESULT_KIND:-recovery}"
 export RUN_LABEL_PREFIX ARM_FILTER
 
 N_VALUES="${N_VALUES:-100,200,400}"
@@ -134,22 +135,18 @@ run_arm() {
       >> "${OUT_DIR}/launcher.log" 2>&1
   fi
 
-  if [[ "${RUN_PLOTS}" == "TRUE" ]]; then
-    local results_file="${OUT_DIR}/comparison_results.csv"
-    if [[ ! -f "${results_file}" ]]; then
-      echo "Skipping plots for ${plot_label}: ${results_file} does not exist."
-      return 0
-    fi
-    export RESULTS_FILE="${results_file}"
-    export PLOT_DIR="${REPO_ROOT}/results/selected_plots/sample_size/three_mixture_settings/${arm_label}"
-    export TABLE_DIR="${REPO_ROOT}/results/selected_tables/sample_size/three_mixture_settings"
-    export METHOD_FILTER="independent_marginal_mixture,viroli_laplace_gibbs"
-    export G_COMPONENT_FILTER="2,3"
-    export P_FILTER="500,1000,1500,2000"
-    export OUTPUT_TAG="${arm_label}_product_map_vs_gibbs"
-    export PLOT_SUBTITLE="${plot_label}; Gibbs was run for p=500/1000"
-    "${RSCRIPT}" scripts/sample_size/plot_fixed_ifeval_grouped_boxplot_panels.R
+  local results_file="${OUT_DIR}/comparison_results.csv"
+  if [[ ! -f "${results_file}" ]]; then
+    echo "No combined results found for ${plot_label}: ${results_file}"
+    return 0
   fi
+
+  if [[ "${EXPORT_SAVED_RESULTS}" == "TRUE" ]]; then
+    local saved_dir="${REPO_ROOT}/results/saved/simulation/${arm_label}"
+    /bin/mkdir -p "${saved_dir}"
+    /bin/cp "${results_file}" "${saved_dir}/${SAVED_RESULT_KIND}_results.csv"
+  fi
+
 }
 
 run_arm \

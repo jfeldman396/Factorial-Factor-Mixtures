@@ -1,0 +1,21 @@
+\begin{table*}[t]
+\centering
+\caption{Recovery across the three factor-mixture configurations. Entries are mean RMSE (Monte Carlo standard deviation) or mean Hamming accuracy (standard deviation), pooled over the matched $p\in\{500,1000\}$ design cells. Each design cell contains 25 replications. For RMSE, lower is better; for Hamming accuracy, higher is better.}
+\label{tab:recovery_by_mixture_setting}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{llcccccccc}
+\toprule
+Configuration & Method & Factor & Probability & Loading & Intercept & Mean & Variance & Weight & Hamming \\
+\midrule
+Separated symmetric & Spectral-MAP & 0.118 (0.021) & 0.077 (0.023) & 0.150 (0.050) & 0.233 (0.088) & 0.076 (0.030) & 0.012 (0.006) & 0.037 (0.014) & 0.987 (0.014) \\
+Separated symmetric & Gibbs & 0.120 (0.022) & 0.074 (0.020) & 0.154 (0.048) & 0.213 (0.067) & 0.128 (0.085) & 0.136 (0.121) & 0.044 (0.020) & 0.938 (0.094) \\
+\addlinespace
+Asymmetric weights & Spectral-MAP & 0.126 (0.024) & 0.078 (0.022) & 0.150 (0.045) & 0.229 (0.079) & 0.085 (0.031) & 0.015 (0.007) & 0.036 (0.013) & 0.986 (0.015) \\
+Asymmetric weights & Gibbs & 0.126 (0.028) & 0.076 (0.020) & 0.155 (0.043) & 0.215 (0.064) & 0.172 (0.131) & 0.147 (0.132) & 0.056 (0.035) & 0.943 (0.089) \\
+\addlinespace
+Moderate overlap & Spectral-MAP & 0.141 (0.027) & 0.080 (0.023) & 0.149 (0.050) & 0.235 (0.091) & 0.083 (0.033) & 0.034 (0.017) & 0.042 (0.017) & 0.953 (0.048) \\
+Moderate overlap & Gibbs & 0.131 (0.022) & 0.076 (0.020) & 0.151 (0.046) & 0.211 (0.067) & 0.143 (0.080) & 0.145 (0.107) & 0.055 (0.026) & 0.877 (0.133) \\
+\bottomrule
+\end{tabular}%
+}
+\end{table*}

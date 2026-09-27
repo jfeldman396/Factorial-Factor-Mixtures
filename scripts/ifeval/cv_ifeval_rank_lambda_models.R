@@ -162,6 +162,111 @@ binary_loglik_masked_alpha <- function(X, W, F_hat, Lambda, alpha) {
   sum(ll[W])
 }
 
+binary_loglik_masked_lowrank <- function(X, W, alpha, L) {
+  eta <- sweep(L, 2L, alpha, "+")
+  p1 <- pmax(pnorm(eta), 1e-12)
+  p0 <- pmax(pnorm(-eta), 1e-12)
+  ll <- X * log(p1) + (1 - X) * log(p0)
+  sum(ll[W])
+}
+
+expected_Z_missing_lowrank <- function(X, W, alpha, L) {
+  eta <- sweep(L, 2L, alpha, "+")
+  Z <- eta
+  for (j in seq_len(ncol(X))) {
+    obs <- W[, j]
+    if (!any(obs)) next
+    mu <- eta[obs, j]
+    y <- X[obs, j]
+    lower <- ifelse(y == 1, 0, -Inf)
+    upper <- ifelse(y == 1, Inf, 0)
+    Z[obs, j] <- truncnorm_binary_moments_vec(mu, 1, lower, upper)$mean
+  }
+  dimnames(Z) <- dimnames(X)
+  Z
+}
+
+fit_lowrank_probit_em_svd_missing <- function(
+    X,
+    W,
+    H,
+    max_iter = 50L,
+    tol_loglik = 1e-5,
+    tol_L = 1e-4,
+    tol_subspace = 2e-3,
+    verbose = FALSE) {
+  # Mask-aware deterministic Stage 1. Held-out cells remain at their fitted
+  # latent means and never enter the observed probit likelihood.
+  X <- as.matrix(X)
+  W <- as.matrix(W)
+  alpha <- initialize_alpha_missing(X, W)
+  L <- matrix(0, nrow(X), ncol(X), dimnames = dimnames(X))
+  old_loglik <- binary_loglik_masked_lowrank(X, W, alpha, L)
+  U_prev <- NULL
+  history <- vector("list", max_iter)
+  converged <- FALSE
+  convergence_reason <- "max_iter"
+
+  for (iter in seq_len(max_iter)) {
+    iter_start <- Sys.time()
+    Wz <- expected_Z_missing_lowrank(X, W, alpha, L)
+    projection <- rank_H_centered_projection(Wz, H)
+    alpha_new <- projection$alpha
+    L_new <- projection$L
+    U_new <- projection$svd$u[, seq_len(H), drop = FALSE]
+    subspace_change <- left_singular_subspace_change(U_prev, U_new)
+    loglik <- binary_loglik_masked_lowrank(X, W, alpha_new, L_new)
+    rel_loglik <- abs(loglik - old_loglik) / (1 + abs(old_loglik))
+    rel_L <- sqrt(sum((L_new - L)^2)) / (1 + sqrt(sum(L^2)))
+
+    history[[iter]] <- data.frame(
+      stage = "pretrain",
+      iteration = iter,
+      train_loglik_per_response = loglik / sum(W),
+      relative_loglik_change = rel_loglik,
+      relative_L_change = rel_L,
+      left_subspace_max_sin_theta = subspace_change$max_sin_theta,
+      left_subspace_projection_distance = subspace_change$projection_distance,
+      iteration_seconds = as.numeric(difftime(Sys.time(), iter_start, units = "secs"))
+    )
+
+    alpha <- alpha_new
+    L <- L_new
+    U_prev <- U_new
+    old_loglik <- loglik
+
+    if (isTRUE(verbose)) {
+      message(
+        "  masked EM-SVD iter ", iter,
+        ": ll/response=", signif(loglik / sum(W), 5),
+        ", rel L=", signif(rel_L, 3),
+        ", max sin angle=", signif(subspace_change$max_sin_theta, 3)
+      )
+    }
+
+    if (is.finite(subspace_change$max_sin_theta) &&
+        subspace_change$max_sin_theta <= tol_subspace) {
+      converged <- TRUE
+      convergence_reason <- "left_subspace"
+      break
+    }
+    if (rel_loglik <= tol_loglik && rel_L <= tol_L) {
+      converged <- TRUE
+      convergence_reason <- "loglik_and_L"
+      break
+    }
+  }
+
+  list(
+    alpha = alpha,
+    L = L,
+    probit_loglik = old_loglik,
+    history = do.call(rbind, history[!vapply(history, is.null, logical(1L))]),
+    converged = converged,
+    convergence_reason = convergence_reason
+  )
+}
+
 score_cells <- function(X, heldout, fit) {
   eta <- sweep(fit$F_hat %*% t(fit$Lambda), 2L, fit$alpha, "+")
   prob <- pmin(pmax(pnorm(eta), 1e-12), 1 - 1e-12)
@@ -234,35 +339,46 @@ update_loadings_probit_missing <- function(X, W, F_hat, Lambda_init, alpha_init,
   )
 }
 
-initialize_mixture_from_Z <- function(Z, W, H, G, loading_penalty, workers,
-                                      n_random_starts, max_outer,
-                                      n_mix_starts, mixture_max_iter,
-                                      mixture_update, seed) {
-  svd_out <- svd_scores_from_Z(Z, H = H, center_Z = TRUE)
+initialize_mixture_from_lowrank <- function(lowrank, X, H, G, loading_penalty,
+                                            workers, n_random_starts,
+                                            n_ica_starts, rotation_optimizer,
+                                            max_outer, n_mix_starts,
+                                            mixture_max_iter, mixture_update,
+                                            seed) {
+  spectral <- spectral_scores_from_lowrank_signal(lowrank$L, H)
   G_fixed <- if (length(G) == 1L) rep(as.integer(G), H) else as.integer(G)
   if (length(G_fixed) != H) {
     stop("G must be either scalar or a length-H component-count vector.")
   }
-  rot <- estimate_mixture_ica_unknown_G(
-    S = svd_out$S,
+  rotation_optimizer <- match.arg(rotation_optimizer, c("riemannian", "givens"))
+  rot <- rotate_em_svd_scores_with_mixtures(
+    S = spectral$S,
     G_fixed = G_fixed,
+    loading_basis = spectral$B,
+    rotation_loading_l1_penalty = loading_penalty,
     n_random_starts = n_random_starts,
+    n_ica_starts = n_ica_starts,
+    include_identity_start = TRUE,
     max_outer = max_outer,
     n_mix_starts = n_mix_starts,
     mixture_max_iter = mixture_max_iter,
     mixture_update = mixture_update,
+    mu_prior_mean = 0,
     mu_prior_kappa = 0.05,
-    var_prior_shape = 4,
-    var_prior_scale = 0.35,
-    weight_prior_alpha = 1.2,
-    grid_size = 17L,
+    var_prior_shape = 3,
+    var_prior_scale = 2,
+    weight_prior_alpha = 1,
+    rotation_optimizer = rotation_optimizer,
     seed = seed,
     parallel = workers > 1L,
     workers = workers,
     verbose = FALSE
   )
-  load <- update_working_loadings_missing(Z, W, rot$F_hat, loading_penalty)
-  list(F_hat = rot$F_hat, Lambda = load$Lambda, alpha = load$alpha,
+  Lambda <- spectral$B %*% rot$R
+  if (loading_penalty > 0) Lambda <- soft_threshold(Lambda, loading_penalty)
+  rownames(Lambda) <- colnames(X)
+  colnames(Lambda) <- paste0("factor_", seq_len(H))
+  list(F_hat = rot$F_hat, Lambda = Lambda, alpha = lowrank$alpha,
        mixture_fits = rot$fits, R = rot$R)
 }
 
@@ -343,7 +459,8 @@ fit_mixture_missing_probit <- function(X, W, H, G, lambda_l1_penalty, fold,
                                        n_aug_iter, n_refine_iter,
                                        z_update,
                                        loading_penalty,
-                                       n_random_starts, max_outer,
+                                       n_random_starts, n_ica_starts,
+                                       rotation_optimizer, max_outer,
                                        n_mix_starts, mixture_max_iter,
                                        mixture_prior_weight,
                                        maxit_per_subject,
@@ -356,49 +473,53 @@ fit_mixture_missing_probit <- function(X, W, H, G, lambda_l1_penalty, fold,
   set.seed(seed + 100000L * fold + 1000L * H +
              10L * G_config_seed(G_fixed) + round(lambda_l1_penalty))
   z_update <- match.arg(z_update, c("sample", "expectation"))
-  Z <- update_Z_missing(
-    X,
-    W,
-    z_update = z_update,
-    seed = seed + 100000L * fold + 1000L * H +
-      10L * G_config_seed(G_fixed) + round(lambda_l1_penalty)
-  )
-  history <- data.frame()
-  current <- NULL
-
-  for (iter in seq_len(n_aug_iter)) {
-    current <- initialize_mixture_from_Z(
-      Z = Z,
-      W = W,
-      H = H,
-      G = G,
-      loading_penalty = loading_penalty,
-      workers = workers,
-      n_random_starts = n_random_starts,
-      max_outer = max_outer,
-      n_mix_starts = n_mix_starts,
-      mixture_max_iter = mixture_max_iter,
-      mixture_update = "map",
-      seed = seed + iter
-    )
-    train_ll <- binary_loglik_masked_alpha(X, W, current$F_hat, current$Lambda, current$alpha)
-    history <- rbind(history, data.frame(
-      stage = "pretrain",
-      iteration = iter,
-      train_loglik_per_response = train_ll / sum(W),
-      mixture_loglik = mixture_prior_loglik(current$F_hat, current$mixture_fits)
-    ))
-    Z <- update_Z_missing(
-      X,
-      W,
-      current$F_hat,
-      current$Lambda,
-      current$alpha,
-      z_update = z_update,
-      seed = seed + 100000L * fold + 1000L * H +
-        10L * G_config_seed(G_fixed) + round(lambda_l1_penalty) + iter
-    )
+  if (z_update != "expectation") {
+    stop("The current IFEval pipeline requires deterministic expectation EM-SVD pretraining.")
   }
+  lowrank <- fit_lowrank_probit_em_svd_missing(
+    X = X,
+    W = W,
+    H = H,
+    max_iter = n_aug_iter,
+    tol_loglik = 1e-5,
+    tol_L = 1e-4,
+    tol_subspace = 2e-3,
+    verbose = FALSE
+  )
+  current <- initialize_mixture_from_lowrank(
+    lowrank = lowrank,
+    X = X,
+    H = H,
+    G = G,
+    loading_penalty = loading_penalty,
+    workers = workers,
+    n_random_starts = n_random_starts,
+    n_ica_starts = n_ica_starts,
+    rotation_optimizer = rotation_optimizer,
+    max_outer = max_outer,
+    n_mix_starts = n_mix_starts,
+    mixture_max_iter = mixture_max_iter,
+    mixture_update = "map",
+    seed = seed + 10000L
+  )
+  history <- lowrank$history
+  history$mixture_loglik <- NA_real_
+  history <- rbind(
+    history,
+    data.frame(
+      stage = "mixture_rotation",
+      iteration = max(history$iteration) + 1L,
+      train_loglik_per_response = binary_loglik_masked_alpha(
+        X, W, current$F_hat, current$Lambda, current$alpha
+      ) / sum(W),
+      relative_loglik_change = NA_real_,
+      relative_L_change = NA_real_,
+      left_subspace_max_sin_theta = NA_real_,
+      left_subspace_projection_distance = NA_real_,
+      iteration_seconds = NA_real_,
+      mixture_loglik = mixture_prior_loglik(current$F_hat, current$mixture_fits)
+    )
+  )
 
   F_hat <- current$F_hat
   Lambda <- current$Lambda
@@ -424,15 +545,15 @@ fit_mixture_missing_probit <- function(X, W, H, G, lambda_l1_penalty, fold,
       maxit_per_subject = maxit_per_subject,
       workers = workers
     )
-    scaled <- normalize_factor_scale_alpha(
+    located <- normalize_refinement_factor_location(
       F_hat = F_hat,
       Lambda = Lambda,
-      mixture_fits = mixture_fits,
-      target_scale = 1
+      alpha = alpha,
+      mixture_fits = mixture_fits
     )
-    F_hat <- scaled$F_hat
-    Lambda <- scaled$Lambda
-    mixture_fits <- scaled$mixture_fits
+    F_hat <- located$F_hat
+    alpha <- located$alpha
+    mixture_fits <- located$mixture_fits
 
     load <- update_loadings_probit_missing(
       X, W, F_hat, Lambda, alpha, lambda_l1_penalty, workers
@@ -448,9 +569,9 @@ fit_mixture_missing_probit <- function(X, W, H, G, lambda_l1_penalty, fold,
       min_var = min_mixture_var,
       mixture_update = "map",
       mu_prior_kappa = 0.05,
-      var_prior_shape = 4,
-      var_prior_scale = 0.35,
-      weight_prior_alpha = 1.2,
+      var_prior_shape = 3,
+      var_prior_scale = 2,
+      weight_prior_alpha = 1,
       parallel = workers > 1L,
       workers = workers
     )
@@ -460,6 +581,15 @@ fit_mixture_missing_probit <- function(X, W, H, G, lambda_l1_penalty, fold,
       stage = "refine",
       iteration = iter,
       train_loglik_per_response = train_ll / sum(W),
+      relative_loglik_change = if (is.finite(prev_score)) {
+        abs(train_ll / sum(W) - prev_score)
+      } else {
+        NA_real_
+      },
+      relative_L_change = NA_real_,
+      left_subspace_max_sin_theta = NA_real_,
+      left_subspace_projection_distance = NA_real_,
+      iteration_seconds = NA_real_,
       mixture_loglik = mixture_prior_loglik(F_hat, mixture_fits)
     ))
     if (iter >= 3L && is.finite(prev_score) &&
@@ -468,6 +598,19 @@ fit_mixture_missing_probit <- function(X, W, H, G, lambda_l1_penalty, fold,
     }
     prev_score <- train_ll / sum(W)
   }
+
+  canonical <- canonical_normalize_factor_parameters(
+    F_hat = F_hat,
+    Lambda = Lambda,
+    alpha = alpha,
+    mixture_fits = mixture_fits,
+    sign_rule = "largest_loading_positive",
+    order_rule = "loading_l2"
+  )
+  F_hat <- canonical$F_hat
+  Lambda <- canonical$Lambda
+  alpha <- canonical$alpha
+  mixture_fits <- canonical$mixture_fits
 
   ord <- ordered_component_labels(F_hat, mixture_fits)
   list(
@@ -479,6 +622,12 @@ fit_mixture_missing_probit <- function(X, W, H, G, lambda_l1_penalty, fold,
     Lambda = Lambda,
     alpha = alpha,
     mixture_fits = mixture_fits,
+    pretraining_converged = lowrank$converged,
+    pretraining_convergence_reason = lowrank$convergence_reason,
+    canonical_normalization = canonical[c(
+      "location_before", "scale_before", "signs", "permutation",
+      "max_abs_eta_difference", "rms_eta_difference"
+    )],
     class_map = ord$class_map,
     responsibilities = ord$responsibilities,
     profile_id = profile_id_from_class_map(ord$class_map),
@@ -668,18 +817,23 @@ workers <- resolve_workers(as.integer(Sys.getenv("WORKERS", "6")))
 seed <- as.integer(Sys.getenv("SEED", "20260812"))
 resume_existing <- isTRUE(tolower(Sys.getenv("RESUME_EXISTING", "TRUE")) %in% c("true", "1", "yes"))
 
-n_aug_iter <- as.integer(Sys.getenv("PRETRAIN_AUG_ITER", "5"))
-n_refine_iter <- as.integer(Sys.getenv("REFINE_ITER", "6"))
-pretrain_z_update <- Sys.getenv("PRETRAIN_Z_UPDATE", "sample")
+n_aug_iter <- as.integer(Sys.getenv("PRETRAIN_AUG_ITER", "50"))
+n_refine_iter <- as.integer(Sys.getenv("REFINE_ITER", "25"))
+pretrain_z_update <- Sys.getenv("PRETRAIN_Z_UPDATE", "expectation")
 if (!pretrain_z_update %in% c("sample", "expectation")) {
   stop("PRETRAIN_Z_UPDATE must be either 'sample' or 'expectation'.")
 }
 loading_penalty <- as.numeric(Sys.getenv("PRETRAIN_LOADING_PENALTY", "0.05"))
 n_random_starts <- as.integer(Sys.getenv("N_RANDOM_STARTS", "1"))
+rotation_ica_starts <- as.integer(Sys.getenv("ROTATION_ICA_STARTS", "1"))
+rotation_optimizer <- match.arg(
+  Sys.getenv("ROTATION_OPTIMIZER", "riemannian"),
+  c("riemannian", "givens")
+)
 max_outer <- as.integer(Sys.getenv("MAX_OUTER", "3"))
 n_mix_starts <- as.integer(Sys.getenv("N_MIX_STARTS", "2"))
 mixture_max_iter <- as.integer(Sys.getenv("MIXTURE_MAX_ITER", "15"))
-mixture_prior_weight <- as.numeric(Sys.getenv("MIXTURE_PRIOR_WEIGHT", "0.35"))
+mixture_prior_weight <- as.numeric(Sys.getenv("MIXTURE_PRIOR_WEIGHT", "1"))
 maxit_per_subject <- as.integer(Sys.getenv("MAXIT_PER_SUBJECT", "45"))
 min_mixture_var <- as.numeric(Sys.getenv("MIN_MIXTURE_VAR", "0.05"))
 save_fits <- isTRUE(tolower(Sys.getenv("SAVE_FITS", "FALSE")) %in% c("true", "1", "yes"))
@@ -736,6 +890,7 @@ if (G_mode == "column_grid") {
 message("lambda_l1 grid: ", paste(lambda_grid, collapse = ", "))
 message("Folds: ", K_folds, "; MAP refinement; workers=", workers)
 message("Pretraining Z update: ", pretrain_z_update)
+message("Rotation: ", rotation_optimizer, "; FastICA starts: ", rotation_ica_starts)
 message("Output directory: ", normalizePath(out_dir, mustWork = FALSE))
 
 method_name <- "independent_mixture_probit"
@@ -785,8 +940,10 @@ for (G in G_grid) {
             n_aug_iter = n_aug_iter,
             n_refine_iter = n_refine_iter,
             z_update = pretrain_z_update,
-            loading_penalty = loading_penalty,
+            loading_penalty = lambda_l1_penalty,
             n_random_starts = n_random_starts,
+            n_ica_starts = rotation_ica_starts,
+            rotation_optimizer = rotation_optimizer,
             max_outer = max_outer,
             n_mix_starts = n_mix_starts,
             mixture_max_iter = mixture_max_iter,
@@ -892,7 +1049,7 @@ if (fit_selected_after_cv) {
       G_FIXED = mixture_G_config,
       WORKERS = as.character(workers),
       REFINEMENT_LAMBDA_L1_PENALTY = as.character(selected$lambda_l1_penalty),
-      PRETRAIN_LOADING_PENALTY = as.character(loading_penalty),
+                PRETRAIN_LOADING_PENALTY = as.character(selected$lambda_l1_penalty),
       PRETRAIN_Z_UPDATE = pretrain_z_update,
       PRETRAIN_AUG_ITER = as.character(n_aug_iter),
       REFINE_ITER = as.character(n_refine_iter),

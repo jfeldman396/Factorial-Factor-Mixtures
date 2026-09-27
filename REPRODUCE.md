@@ -1,229 +1,146 @@
 # Reproduction Guide
 
-For the most complete instructions, see `REPLICATION.md`.
+Run all commands from the repository root. The code was developed with R 4.x on macOS and uses multicore processing through `parallel::mclapply`.
 
-All commands below assume the working directory is the repository root:
+## Dependencies
 
-```sh
-cd "/Users/joefeldman/Documents/Deep Factor Models/factorial-factor-mixtures"
+Install the R packages used by the retained workflows:
+
+```r
+install.packages(c(
+  "clue", "expm", "fastICA", "ggplot2", "glmnet", "gridExtra",
+  "jsonlite"
+))
 ```
 
-## R Package Requirements
+The optional interactive IFEval plots also use Python packages `numpy`, `pandas`, `matplotlib`, and `plotly`. Rebuilding the IFEval matrices from OpenEval additionally requires `pyarrow` and `huggingface_hub`.
 
-The current scripts use base R plus common CRAN packages including `MASS`, `truncnorm`, `ggplot2`, `reshape2`, and `mclust`. Some plotting scripts also use Python packages such as `pandas`, `numpy`, `matplotlib`, and `plotly`.
+## 1. Recovery Study
 
-## Sample-Size Simulation
-
-The paper-facing main simulation launcher is:
+The design is documented in `docs/fixed_ifeval_lambda_simulation_design.md`. The authoritative launcher is:
 
 ```sh
-Rscript scripts/sample_size/run_fixed_ifeval_lambda_simulation.R
+zsh scripts/sample_size/run_three_arm_recovery_study.sh
 ```
 
-It reproduces the fixed-DGP IFEval-like Lambda simulation:
+It runs 25 replications of the following grid:
 
-- `n in {100, 200, 400}`;
-- Product MAP `p in {500, 1000, 1500, 2000}`;
-- Viroli Gibbs baselines `p in {500, 1000}`;
-- `H in {5, 10}`;
-- `G_h = 2` for all factors, or `G_h = 3` for all factors;
-- 25 replications per setting;
-- IFEval-like unbalanced loading blocks with at least 30 primary items in the
-  smallest block;
-- primary and cross-loading magnitudes sampled from `Uniform(2, 3)`;
-- randomly signed cross-loadings with probability `0.05`;
-- mixture separation `2`;
-- n-dependent loading penalties: `5` for `n = 100, 200` and `8` for
-  `n = 400`.
+- `n = {100, 200, 400}`;
+- Product MAP `p = {500, 1000, 1500, 2000}`;
+- Laplace Gibbs `p = {500, 1000}`;
+- `H = {5, 10}`;
+- all factors have either two or three mixture components;
+- separated, asymmetric-weight, and moderate-overlap mixture settings.
 
-The raw run directory is:
+The DGP uses fixed IFEval-like unbalanced loading blocks within each design cell, loading magnitudes from `Uniform(1, 2)`, cross-loading probability `0.05`, random cross-loading signs, and 25 independently simulated datasets. The shared loading penalty is 3 at `n = 100` and 5 otherwise. Product MAP uses 18 internal workers; Gibbs uses four launcher workers and four internal workers by default. Gibbs retains 1,000 draws after 1,000 burn-in iterations, canonicalizes and aligns retained draws before averaging, and records parameter ESS.
 
-```sh
-results/full/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10
-```
-
-That directory is ignored by git because it contains chunk logs and large
-checkpoint artifacts. The combined raw CSV is:
-
-```sh
-results/full/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10/comparison_results.csv
-```
-
-The current completed run has 2400 rows: 1200 Product MAP rows, 600 Viroli
-Laplace Gibbs rows, and 600 Viroli Gaussian Gibbs rows.
-
-Regenerate the committed loading heatmaps and selected result plots with:
-
-```sh
-Rscript scripts/sample_size/plot_fixed_ifeval_lambda_heatmaps.R
-Rscript scripts/sample_size/plot_fixed_ifeval_lambda_progress.R
-```
-
-Selected plots are stored under:
-
-```sh
-results/selected_plots/sample_size/fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10
-```
-
-Selected CSV snapshots are stored under:
-
-```sh
-results/selected_tables/sample_size/
-```
-
-For the longer explanation of the design and methods, see:
-
-```sh
-docs/fixed_ifeval_lambda_simulation_design.md
-docs/fixed_ifeval_lambda_simulation_design.pdf
-```
-
-## IFEval Analysis
-
-### Recreate The Analysis Matrix
-
-The fitted IFEval analysis uses `data/ifeval/openeval_ifeval_only_binary_matrix.csv`.
-This is a binary model-by-item matrix.  The entries are formed from OpenEval
-responses by extracting the numeric `ifeval_strict_accuracy` values from each
-nested score object, averaging within model-item pairs, and coding the pair as
-correct when the average score is at least `0.5`.
-
-To rebuild the source OpenEval matrix from Hugging Face, install the data
-dependencies and run:
-
-```sh
-python3 -m pip install pandas pyarrow huggingface_hub
-```
-
-```sh
-python3 scripts/data/format_openeval_binary_matrix.py \
-  --benchmarks ifeval \
-  --out-dir data/openeval_ifeval_formatted_uncapped \
-  --min-item-response-prop 0.25 \
-  --min-model-response-prop 0.25
-```
-
-If the OpenEval snapshot is already cached locally, the same command can be
-run without network access by adding:
-
-```sh
---local-snapshot-dir "$HOME/.cache/huggingface/hub/datasets--human-centered-eval--OpenEval/snapshots/<snapshot-id>"
-```
-
-The formatter writes both response data and item provenance:
+Resumable chunks and logs are written to `results/full/` and are ignored by git. Each completed arm exports its combined CSV to:
 
 ```text
-data/openeval_ifeval_formatted_uncapped/openeval_binary_matrix_raw.csv
-data/openeval_ifeval_formatted_uncapped/openeval_response_long_scores.csv
-data/openeval_ifeval_formatted_uncapped/openeval_item_metadata.csv
-data/openeval_ifeval_formatted_uncapped/openeval_item_instruction_metadata_long.csv
+results/saved/simulation/separated/recovery_results.csv
+results/saved/simulation/asymmetric_pi/recovery_results.csv
+results/saved/simulation/moderate_overlap/recovery_results.csv
 ```
 
-`openeval_item_metadata.csv` includes the raw OpenEval item payload plus
-parsed columns for `prompt`, `instruction_ids`, `instruction_families`,
-`n_instructions`, and `instruction_kwargs`.  The long instruction metadata has
-one row per item-instruction pair, which is the table to use when relating the
-25 retained IFEval instruction ids to the lower-dimensional factor solution.
-
-Then create the model-facing IFEval matrix by starting from the full
-model-by-item matrix, selecting IFEval columns, removing low-coverage models
-and items, requiring complete item columns for the retained models, and
-retaining only nonconstant items:
+Observation-level subtype metrics require retained allocation summaries and are reproduced with:
 
 ```sh
-OPENEVAL_FULL_MATRIX=data/openeval_ifeval_formatted_uncapped/openeval_binary_matrix_raw.csv \
-OPENEVAL_ITEM_METADATA=data/openeval_ifeval_formatted_uncapped/openeval_item_metadata.csv \
-OPENEVAL_ITEM_INSTRUCTION_METADATA=data/openeval_ifeval_formatted_uncapped/openeval_item_instruction_metadata_long.csv \
-OUT_DIR=data/ifeval \
-Rscript scripts/ifeval/create_ifeval_analysis_matrix.R
+zsh scripts/sample_size/run_component_profile_recovery_addendum.sh
 ```
 
-The currently committed uncapped build starts from `124` models and `541`
-IFEval items.  It drops `2` low-coverage models, drops `0` item columns for
-coverage or missingness after that model filter, and drops `7` all-correct
-constant item columns.  The final analysis matrix has `122` models and `534`
-retained IFEval items.  The exact counts are stored in
-`data/ifeval/ifeval_analysis_matrix_build_summary.csv`.  The retained
-`score >= 0.5` analysis metadata contains `25` unique instruction ids, `9`
-instruction families, and `820` retained item-instruction rows.
-
-To build threshold-specific matrices for IFEval strict-accuracy scores
-`score >= 0.5`, `score >= 2/3`, and `score >= 1.0`, run:
+This writes `subtype_results.csv` beside each arm's recovery CSV. Validate the retained recovery grid with:
 
 ```sh
-scripts/ifeval/build_ifeval_threshold_matrices.sh
+Rscript scripts/sample_size/build_simulation_release_results.R
+Rscript scripts/sample_size/validate_three_arm_recovery_study.R
 ```
 
-This creates:
+Generate every manuscript and supplement figure/table with:
+
+```sh
+Rscript scripts/sample_size/make_simulation_section_artifacts.R
+```
+
+The outputs are under:
 
 ```text
-data/ifeval_threshold_0p5
-data/ifeval_threshold_0p67
-data/ifeval_threshold_1
+results/selected_plots/sample_size/paper_simulation_section/
+results/selected_tables/sample_size/paper_simulation_section/
 ```
 
-The `0p67` label denotes the exact two-thirds cutoff.  A literal threshold of
-`0.67` would exclude scores equal to `2/3` and would therefore produce the same
-matrix as `score >= 1.0` for this snapshot.
+## 2. Rotation Ablation
 
-The regenerated threshold-specific analysis matrices have the following
-dimensions:
-
-| Folder | Strict-accuracy rule | Models | Retained prompts | Mean binary score |
-| --- | --- | ---: | ---: | ---: |
-| `data/ifeval_threshold_0p5/` | `score >= 0.5` | 122 | 534 | 0.757 |
-| `data/ifeval_threshold_0p67/` | `score >= 2/3` | 122 | 538 | 0.653 |
-| `data/ifeval_threshold_1/` | `score >= 1` | 122 | 534 | 0.619 |
-
-To run the full threshold sensitivity analysis:
+Run the full three-setting ablation:
 
 ```sh
-scripts/ifeval/run_ifeval_threshold_analyses.sh
+zsh scripts/sample_size/run_rotation_ablation_three_arms.sh
 ```
 
-The resulting fits are written under
-`results/full/ifeval_threshold_sensitivity`.
+Per-replication results are written directly to:
 
-Run the full IFEval pipeline with:
+```text
+results/saved/rotation_ablation/{separated,asymmetric_pi,moderate_overlap}/
+```
+
+Validate coverage and regenerate the paper summaries:
 
 ```sh
-zsh scripts/ifeval/run_full_analysis.sh
+Rscript scripts/sample_size/summarize_rotation_ablation_three_arms.R
+Rscript scripts/sample_size/plot_rotation_ablation_estimated_z_boxplots.R
 ```
 
-The major steps are:
+The figures and summary tables are under:
 
-1. Held-out predictive likelihood tuning over rank, component-wise `G`, and sparse loading penalty.
-2. Selected mixture model refit with MAP refinement.
-3. Loading/cross-loading summaries.
-4. Factor-score and mixture-profile visualization.
-5. Writeup rendering.
+```text
+results/selected_plots/sample_size/rotation_ablation_three_arms/
+results/selected_tables/sample_size/rotation_ablation_three_arms/
+```
 
-Selected generated tables and plots are stored under `results/selected_tables/ifeval` and `results/selected_plots/ifeval`.
+## 3. IFEval
 
-The current component-wise interpretation reported in the writeup uses
-`H = 4`, `G = (3,3,1,3)`, and sparse-loading MAP refinement with
-`lambda_l1_penalty = 4`. To reproduce that selected fit directly:
+The committed model-by-item matrices and metadata are in:
+
+```text
+data/ifeval/
+data/ifeval_threshold_0p5/
+data/ifeval_threshold_0p67/
+data/ifeval_threshold_1/
+```
+
+The `0p67` label uses the exact cutoff `2/3`. To rebuild these matrices from a local or downloaded OpenEval snapshot:
 
 ```sh
-MATRIX_PATH=data/ifeval/openeval_ifeval_only_binary_matrix.csv \
-ITEM_METADATA_PATH=data/ifeval/openeval_item_metadata.csv \
-OUT_DIR=results/full/ifeval/reproduced_componentwise_H4_G3313_lambda4 \
-H_FIXED=4 \
-G_FIXED=3,3,1,3 \
-WORKERS=8 \
-PRETRAIN_AUG_ITER=20 \
-REFINE_ITER=20 \
-MIXTURE_MAX_ITER=200 \
-REQUIRE_MIXTURE_CONVERGENCE=TRUE \
-REFINEMENT_LAMBDA_L1_PENALTY=4 \
-Rscript scripts/ifeval/fit_interpret_ifeval_mixture.R
+zsh scripts/ifeval/build_ifeval_threshold_matrices.sh
 ```
 
-The compact writeup for this fit is `writeup/ifeval_componentwise_G3313.pdf`.
+Set `LOCAL_SNAPSHOT_DIR` if the OpenEval snapshot is not at the default Hugging Face cache location.
 
-## Notes For Audit
+Run rank/component/penalty selection, selected-model refitting, and interpretation for all three thresholds with:
 
-The scripts are intentionally close to the working analysis versions. The next
-code-review pass should split data generation, fitting, alignment, metrics, and
-plotting into smaller functions with unit tests. See `FUNCTION_MAP.md` for the
-current function inventory and `CODE_AUDIT.md` for the latest static audit.
+```sh
+OUT_BASE=results/full/ifeval_threshold_sensitivity_current \
+  WORKERS=18 \
+  zsh scripts/ifeval/run_ifeval_threshold_analyses.sh
+```
+
+The workflow is resumable. Intermediate fits are written to `results/full/`; final analysis-ready outputs belong in `results/saved/ifeval/`, and paper artifacts belong in `results/selected_plots/ifeval/` and `results/selected_tables/ifeval/`.
+
+To export a completed run manually, use:
+
+```sh
+IFEVAL_FULL_ROOT=results/full/ifeval_threshold_sensitivity_current \
+  Rscript scripts/ifeval/export_ifeval_release.R
+```
+
+## Tests
+
+Run the retained Gibbs identification and subtype checks with:
+
+```sh
+Rscript tests/test_viroli_draw_alignment.R
+Rscript tests/test_viroli_mixture_updates_and_subtype_mode.R
+```
+
+## Saved Results Contract
+
+`results/saved/` contains analysis-ready results only. Resumable chunks, logs, RDS objects, smoke tests, and intermediate diagnostics are deliberately excluded. `results/selected_plots/` and `results/selected_tables/` contain only artifacts used by the paper or supplement.

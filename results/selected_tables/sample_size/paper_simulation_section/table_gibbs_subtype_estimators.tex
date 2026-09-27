@@ -1,0 +1,19 @@
+\begin{table}[t]
+\centering
+\caption{Gibbs subtype recovery under two posterior summaries. Entries are means with Monte Carlo standard deviations in parentheses, pooled over the matched $p\in\{500,1000\}$ design cells, with 25 replications per cell. The allocation-mode estimator uses the modal aligned sampled component label for each subject and factor; the posterior-mean plug-in estimator classifies the aligned posterior-mean score using the aligned posterior-mean mixture parameters. Higher values are better.}
+\label{tab:gibbs_subtype_estimators}
+\begin{tabular}{llcc}
+\toprule
+Configuration & Gibbs subtype estimator & Hamming & Exact profile \\
+\midrule
+Separated symmetric & Allocation mode & 0.938 (0.094) & 0.744 (0.343) \\
+ & Posterior-mean plug-in & 0.971 (0.037) & 0.828 (0.218) \\
+\addlinespace
+Asymmetric weights & Allocation mode & 0.943 (0.089) & 0.760 (0.321) \\
+ & Posterior-mean plug-in & 0.968 (0.042) & 0.813 (0.233) \\
+\addlinespace
+Moderate overlap & Allocation mode & 0.877 (0.133) & 0.588 (0.425) \\
+ & Posterior-mean plug-in & 0.923 (0.080) & 0.657 (0.357) \\
+\bottomrule
+\end{tabular}
+\end{table}

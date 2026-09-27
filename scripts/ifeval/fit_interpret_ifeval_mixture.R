@@ -282,65 +282,72 @@ plot_top_loading_heatmap <- function(loadings, H, out_dir, top_n = 140L) {
 
 X <- read_binary_matrix(matrix_path)
 model_id <- rownames(X)
-n_aug_iter <- as.integer(Sys.getenv("PRETRAIN_AUG_ITER", "8"))
-n_refine_iter <- as.integer(Sys.getenv("REFINE_ITER", "8"))
-mixture_max_iter <- as.integer(Sys.getenv("MIXTURE_MAX_ITER", "20"))
-z_update <- Sys.getenv("PRETRAIN_Z_UPDATE", "sample")
-if (!z_update %in% c("sample", "expectation")) {
-  stop("PRETRAIN_Z_UPDATE must be either 'sample' or 'expectation'.")
+n_aug_iter <- as.integer(Sys.getenv("PRETRAIN_AUG_ITER", "50"))
+n_refine_iter <- as.integer(Sys.getenv("REFINE_ITER", "25"))
+mixture_max_iter <- as.integer(Sys.getenv("MIXTURE_MAX_ITER", "200"))
+z_update <- Sys.getenv("PRETRAIN_Z_UPDATE", "expectation")
+if (z_update != "expectation") {
+  stop("The current IFEval pipeline requires deterministic expectation EM-SVD pretraining.")
 }
+rotation_optimizer <- match.arg(
+  Sys.getenv("ROTATION_OPTIMIZER", "riemannian"),
+  c("riemannian", "givens")
+)
+rotation_ica_starts <- as.integer(Sys.getenv("ROTATION_ICA_STARTS", "1"))
 
 t0 <- proc.time()[["elapsed"]]
-pre <- fit_binary_probit_pretraining_intercept(
+fit <- fit_binary_probit_em_svd_pretrain_then_refine(
   X = X,
   H = H_fixed,
   G_fixed = G_fixed,
-  n_aug_iter = n_aug_iter,
-  z_update = z_update,
-  n_random_starts = 1L,
-  max_outer = 4L,
+  em_max_iter = n_aug_iter,
+  em_tol_loglik = 1e-5,
+  em_tol_L = 1e-4,
+  em_tol_subspace = 2e-3,
+  em_init_method = "both",
+  em_init_z = z_update,
+  em_projection_update = "expectation",
+  rotation_random_starts = 0L,
+  rotation_ica_starts = rotation_ica_starts,
+  rotation_optimizer = rotation_optimizer,
+  rotation_loading_l1_penalty = refinement_lambda_l1_penalty,
+  rotation_max_outer = 20L,
   n_mix_starts = 3L,
+  mixture_max_iter = mixture_max_iter,
   mixture_update = "map",
+  mu_prior_mean = 0,
   mu_prior_kappa = 0.05,
-  var_prior_shape = 4,
-  var_prior_scale = 0.35,
-  weight_prior_alpha = 1.2,
-  loading_penalty = pretrain_loading_penalty,
-  objective_tolerance = 5e-4,
-  objective_tolerance_scale = "per_response",
-  min_aug_iter = 5L,
+  var_prior_shape = 3,
+  var_prior_scale = 2,
+  weight_prior_alpha = 1,
+  refine_mu_prior_mean = 0,
+  refine_mu_prior_kappa = 0.05,
+  refine_var_prior_shape = 3,
+  refine_var_prior_scale = 2,
+  refine_weight_prior_alpha = 1,
+  loading_penalty = refinement_lambda_l1_penalty,
+  n_refine_iter = n_refine_iter,
+  factor_update = "marginal",
+  min_mixture_var = 0.05,
+  lambda_l1_penalty = refinement_lambda_l1_penalty,
+  factor_score_bound = 3,
+  normalize_factor_scale = FALSE,
+  normalize_factor_location = TRUE,
+  objective_tolerance = 1e-3,
+  min_refine_iter = 3L,
+  enforce_monotone_refinement = TRUE,
+  return_best_refinement_iteration = TRUE,
+  refinement_selection_objective = "posterior_objective",
+  require_mixture_convergence_for_stop = require_mixture_convergence,
   parallel = TRUE,
   workers = workers,
   seed = 20260724L,
   verbose = FALSE
 )
-
-ref <- fit_binary_probit_refinement_intercept(
-  X = X,
-  pretrain_fit = pre,
-  n_refine_iter = n_refine_iter,
-  maxit_per_subject = 60L,
-  n_mix_starts = 3L,
-  mixture_max_iter = mixture_max_iter,
-  min_mixture_var = 0.05,
-  mixture_update = "map",
-  mu_prior_kappa = 0.05,
-  var_prior_shape = 4,
-  var_prior_scale = 0.35,
-  weight_prior_alpha = 1.2,
-  mixture_prior_weight = 0.2,
-  lambda_l1_penalty = refinement_lambda_l1_penalty,
-  objective_tolerance = 2e-4,
-  objective_tolerance_scale = "relative_total",
-  min_refine_iter = 4L,
-  require_mixture_convergence = require_mixture_convergence,
-  keep_best_binary_iterate = TRUE,
-  parallel = TRUE,
-  workers = workers,
-  verbose = FALSE
-)
 elapsed <- proc.time()[["elapsed"]] - t0
 
+pre <- fit$pretrain_fit
+ref <- canonical_normalize_refined_fit(fit$refine_fit, min_scale = 1e-4)
 ref$H <- ncol(ref$F_hat)
 ref <- orient_factors_by_accuracy(ref)
 
@@ -375,7 +382,7 @@ load_meta <- merge(loadings, item_meta, by = "item_id", all.x = TRUE, sort = FAL
 write.csv(scores, file.path(out_dir, "openeval_model_factor_scores_profiles.csv"), row.names = FALSE)
 write.csv(load_meta, file.path(out_dir, "openeval_item_intercepts_loadings_metadata.csv"), row.names = FALSE)
 write.csv(summarize_mixture_profiles_ordered(ref), file.path(out_dir, "openeval_factor_mixture_groups.csv"), row.names = FALSE)
-write.csv(ref$pretraining$history, file.path(out_dir, "openeval_pretraining_history.csv"), row.names = FALSE)
+write.csv(pre$em_history, file.path(out_dir, "openeval_pretraining_history.csv"), row.names = FALSE)
 write.csv(ref$joint_refinement$history, file.path(out_dir, "openeval_refinement_history.csv"), row.names = FALSE)
 fit_label <- sprintf("openeval_H%d_G%s", H_fixed, G_label)
 saveRDS(ref, file.path(out_dir, paste0(fit_label, "_fit.rds")))
@@ -469,9 +476,15 @@ fit_summary <- data.frame(
   n_models = nrow(X),
   n_items = ncol(X),
   binary_loglik_per_response = binary_ll / length(X),
-  pretraining_iterations = ref$pretraining$n_completed,
+  pretraining_iterations = pre$pretraining_completed_iter,
+  pretraining_converged = pre$pretraining_converged,
+  pretraining_convergence_reason = pre$pretraining_convergence_reason,
+  rotation_optimizer = pre$rotation_optimizer,
+  rotation_converged = pre$rotation_converged,
   refinement_iterations = ref$joint_refinement$n_completed,
-  refinement_selected_iteration = ref$joint_refinement$selected_iteration,
+  refinement_converged = ref$joint_refinement$converged,
+  refinement_selected_iteration = ref$joint_refinement$selected_refinement_iteration,
+  canonical_max_abs_eta_difference = ref$canonical_normalization$max_abs_eta_difference,
   elapsed_sec = elapsed
 )
 write.csv(fit_summary, file.path(out_dir, paste0(fit_label, "_fit_summary.csv")), row.names = FALSE)

@@ -423,7 +423,6 @@ evaluate_estimate <- function(stage, rotation_method, sim, H, G, F_hat, Lambda_h
   mix <- marginal_mixture_summary(sim$mixture_params, mixture_aligned, G)
   eta_true <- sweep(sim$F %*% t(sim$Lambda), 2L, sim$alpha, "+")
   eta_hat <- sweep(F_aligned %*% t(Lambda_aligned), 2L, alpha_hat, "+")
-
   cbind(
     data.frame(
       stage = stage,
@@ -1545,7 +1544,7 @@ plot_only <- get_env("PLOT_ONLY", FALSE, as.logical)
 resume_existing <- get_env("RESUME_EXISTING", FALSE, as.logical)
 out_dir <- get_env(
   "OUT_DIR",
-  file.path(repo_root, "results", "diagnostics", run_label)
+  file.path(repo_root, "results", "saved", "rotation_ablation", run_label)
 )
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 

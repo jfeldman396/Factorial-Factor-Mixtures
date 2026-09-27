@@ -1,0 +1,7 @@
+"arm","run_label","method","expected_rows","observed_rows","unique_keys","duplicate_keys","missing_keys","extra_keys","complete"
+"separated","fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_npenalty3_5_full_separated","independent_marginal_mixture",1200,1200,1200,0,0,0,TRUE
+"separated","fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_npenalty3_5_full_separated","viroli_laplace_gibbs",600,600,600,0,0,0,TRUE
+"asymmetric_pi","fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_npenalty3_5_full_asymmetric_pi","independent_marginal_mixture",1200,1200,1200,0,0,0,TRUE
+"asymmetric_pi","fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_npenalty3_5_full_asymmetric_pi","viroli_laplace_gibbs",600,600,600,0,0,0,TRUE
+"moderate_overlap","fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_npenalty3_5_full_moderate_overlap","independent_marginal_mixture",1200,1200,1200,0,0,0,TRUE
+"moderate_overlap","fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_npenalty3_5_full_moderate_overlap","viroli_laplace_gibbs",600,600,600,0,0,0,TRUE

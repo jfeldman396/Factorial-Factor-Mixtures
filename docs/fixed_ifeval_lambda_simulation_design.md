@@ -187,70 +187,41 @@ zsh scripts/sample_size/run_component_profile_recovery_addendum.sh
 ```
 
 This addendum retains the same three DGP arms, scientific seeds, convergence
-settings, loading penalties, and 25 replications as the main study. It writes
-to separate `*_component_profile_<arm>` result roots so the original outputs
-remain immutable.
-
-The three output roots are:
+settings, loading penalties, and 25 replications as the main study. Resumable
+chunks are written below the ignored `results/full/` tree. The release CSVs are:
 
 ```text
-results/full/fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_npenalty3_5_full_separated/
-results/full/fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_npenalty3_5_full_asymmetric_pi/
-results/full/fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_npenalty3_5_full_moderate_overlap/
+results/saved/simulation/separated/{recovery,subtype}_results.csv
+results/saved/simulation/asymmetric_pi/{recovery,subtype}_results.csv
+results/saved/simulation/moderate_overlap/{recovery,subtype}_results.csv
 ```
 
-Each root contains chunk checkpoints, a combined `comparison_results.csv`, and
-a `replication_manifest.txt` with the realized settings. Rerunning the command
-skips completed chunks.
-
-Recreate the eight grouped boxplots without refitting:
+Validate the recovery rows and matched data-generating seeds with:
 
 ```bash
-RUN_FITS=FALSE RUN_PLOTS=TRUE \
-zsh scripts/sample_size/run_three_arm_recovery_study.sh
+Rscript scripts/sample_size/validate_three_arm_recovery_study.R
 ```
 
-Every metric is written as both a 300-dpi PNG for slides and a vector PDF for
-papers. All three arms use the same dimensions, facet order, method colors, and
-labels.
-
-For the completed historical robustness jobs, run:
+Generate all paper and supplement figures and tables from the saved CSVs with:
 
 ```bash
-zsh scripts/sample_size/finalize_three_arm_recovery_study.sh
+Rscript scripts/sample_size/make_simulation_section_artifacts.R
 ```
-
-This preserves the source run on every row, validates the intended 25-rep
-Product MAP coverage, records the five-rep `n=200,400` Gibbs robustness scope,
-and verifies all 48 paper-ready PNG/PDF exports.
 
 Figures are written below:
 
 ```text
-results/selected_plots/sample_size/three_mixture_settings/
+results/selected_plots/sample_size/paper_simulation_section/
 ```
 
-Cell means are written below:
+Tables are written below:
 
 ```text
-results/selected_tables/sample_size/three_mixture_settings/
+results/selected_tables/sample_size/paper_simulation_section/
 ```
 
 Use `ARM_FILTER=separated`, `ARM_FILTER=asymmetric_pi`, or
-`ARM_FILTER=moderate_overlap` to fit or plot one arm.
-
-## Interrupted-Run Utilities
-
-These scripts exist to recover historical partial runs and are not the
-preferred entry point for a clean replication:
-
-- `run_n100_lambda3_study.sh`: the complete `n = 100` block for all arms.
-- `run_product_map_robustness_completion.sh`: Product MAP at `n = 200, 400`
-  for the asymmetric and overlap arms, with `p_max = 2000`.
-- `run_lambda5_sensitivity_asym_overlap.sh`: superseded five-replication pilot.
-- `assemble_three_arm_recovery_results.R` and
-  `finalize_three_arm_recovery_study.sh`: provenance-preserving assembly and
-  final figure export for historical partial runs.
+`ARM_FILTER=moderate_overlap` to fit one arm.
 
 ## Rotation Ablation And Rank Diagnostic
 
@@ -268,6 +239,9 @@ refinement, parameter recovery, runtime, estimated-versus-oracle signal error,
 and eigengap rank diagnostics from a separate overcomplete rank-15 fit.
 The loading penalty is `3` at `n = 100` and `5` at `n in {200, 400}`, and the
 ablation uses 18 internal workers.
+
+Per-replication results are written to
+`results/saved/rotation_ablation/<arm>/`.
 
 After all three arms finish, validate coverage and create tracked compact
 tables and paper-ready PNG/PDF figures with:

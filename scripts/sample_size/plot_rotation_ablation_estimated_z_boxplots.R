@@ -13,14 +13,16 @@ file_arg <- sub("^--file=", "", file_arg[grepl("^--file=", file_arg)])
 script_dir <- if (length(file_arg)) dirname(normalizePath(file_arg[1L])) else getwd()
 repo_root <- normalizePath(file.path(script_dir, "..", ".."))
 
-run_prefix <- "rotation_ablation_ifeval_u1_2_cp0_05_sep2_penalty3_5_"
 arms <- c("separated", "asymmetric_pi", "moderate_overlap")
 arm_titles <- c(
   separated = "Separated mixtures",
   asymmetric_pi = "Asymmetric mixture weights",
   moderate_overlap = "Moderate component overlap"
 )
-diagnostic_root <- file.path(repo_root, "results", "diagnostics")
+saved_root <- Sys.getenv(
+  "ROTATION_RESULTS_DIR",
+  file.path(repo_root, "results", "saved", "rotation_ablation")
+)
 plot_dir <- file.path(
   repo_root, "results", "selected_plots", "sample_size",
   "rotation_ablation_three_arms", "estimated_z_boxplots"
@@ -29,8 +31,8 @@ dir.create(plot_dir, recursive = TRUE, showWarnings = FALSE)
 
 read_arm <- function(arm) {
   path <- file.path(
-    diagnostic_root,
-    paste0(run_prefix, arm),
+    saved_root,
+    arm,
     "rotation_fastica_results.csv"
   )
   if (!file.exists(path)) stop("Missing result file: ", path, call. = FALSE)

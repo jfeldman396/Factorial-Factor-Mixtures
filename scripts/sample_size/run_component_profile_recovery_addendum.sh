@@ -24,9 +24,10 @@ export RUN_PRODUCT_MAP=TRUE
 export RUN_VIROLI_LAPLACE=TRUE
 export RUN_VIROLI_GAUSSIAN=FALSE
 export RUN_FITS=TRUE
-export RUN_PLOTS=TRUE
 export VALIDATE_RESULTS=FALSE
+export SAVED_RESULT_KIND=subtype
 export VIROLI_NORMALIZE_EACH_DRAW=TRUE
 export VIROLI_ALIGN_RETAINED_DRAWS=TRUE
 
 zsh scripts/sample_size/run_three_arm_recovery_study.sh
+Rscript scripts/sample_size/build_simulation_release_results.R

@@ -1,0 +1,4 @@
+"arm","matched_rows","seed_columns_checked","seed_mismatch_rows","seeds_match"
+"separated",600,"data_seed,loading_parameter_seed,mixture_parameter_seed",0,TRUE
+"asymmetric_pi",600,"data_seed,loading_parameter_seed,mixture_parameter_seed",0,TRUE
+"moderate_overlap",600,"data_seed,loading_parameter_seed,mixture_parameter_seed",0,TRUE

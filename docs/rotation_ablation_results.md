@@ -78,8 +78,13 @@ After all arms finish, validate and regenerate the compact results with:
 Rscript scripts/sample_size/summarize_rotation_ablation_three_arms.R
 ```
 
-The full per-replication outputs are written below `results/diagnostics/` and
-remain gitignored. Compact tables are tracked below:
+The full per-replication CSVs are retained below:
+
+```text
+results/saved/rotation_ablation/
+```
+
+Compact tables are tracked below:
 
 ```text
 results/selected_tables/sample_size/rotation_ablation_three_arms/

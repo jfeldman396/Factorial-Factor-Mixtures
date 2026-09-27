@@ -82,6 +82,8 @@ seed_checks <- list()
 for (arm in arms) {
   run_label <- paste(prefix, arm, sep = "_")
   result_file <- file.path(repo_root, "results", "full", run_label, "comparison_results.csv")
+  saved_file <- file.path(repo_root, "results", "saved", "simulation", arm, "analysis_results.csv")
+  if (!file.exists(result_file) && file.exists(saved_file)) result_file <- saved_file
   if (!file.exists(result_file)) {
     for (method in names(method_specs)) {
       integrity[[length(integrity) + 1L]] <- data.frame(
@@ -158,7 +160,7 @@ for (arm in arms) {
 
 integrity <- if (length(integrity)) do.call(rbind, integrity) else data.frame()
 seed_checks <- if (length(seed_checks)) do.call(rbind, seed_checks) else data.frame()
-table_dir <- file.path(repo_root, "results", "selected_tables", "sample_size", "three_mixture_settings")
+table_dir <- file.path(repo_root, "results", "saved", "simulation")
 dir.create(table_dir, recursive = TRUE, showWarnings = FALSE)
 write.csv(integrity, file.path(table_dir, "three_arm_recovery_integrity.csv"), row.names = FALSE)
 write.csv(seed_checks, file.path(table_dir, "three_arm_recovery_matched_seed_check.csv"), row.names = FALSE)

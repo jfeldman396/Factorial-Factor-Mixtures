@@ -1,0 +1,28 @@
+% Requires: \usepackage{graphicx,booktabs}
+% Paths are relative to the repository root.
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{results/selected_plots/sample_size/paper_simulation_section/fig_data_generating_loadings.pdf}
+  \includegraphics[width=\linewidth]{results/selected_plots/sample_size/paper_simulation_section/fig_data_generating_mixtures.pdf}
+  \caption{Data-generating loading structures and latent factor mixture distributions. Top: loading matrices for $p=500$ and $H\in\{5,10\}$. Bottom: representative three-component factor marginals under separated symmetric, asymmetric-weight, and moderate-overlap configurations.}
+  \label{fig:loadings_clusters}
+\end{figure}
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=\textwidth]{results/selected_plots/sample_size/paper_simulation_section/fig_factor_recovery_separated.pdf}
+  \caption{Factor-score recovery under the separated symmetric mixture configuration. Boxplots summarize 25 replications. Gibbs was run for $p\in\{500,1000\}$; the larger-$p$ columns report Spectral-MAP.}
+  \label{fig:factor_recovery_separated}
+\end{figure*}
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=\textwidth]{results/selected_plots/sample_size/paper_simulation_section/fig_mixture_subtype_recovery_separated.pdf}
+  \caption{Mixture-parameter and subtype recovery under the separated symmetric configuration. Points are means and bars show $\pm2$ Monte Carlo standard errors over 25 replications. Line type distinguishes $p=500$ and $p=1000$. For Gibbs, Hamming accuracy uses the posterior mode of the aligned sampled allocations.}
+  \label{fig:mixture_subtype_separated}
+\end{figure*}
+
+\input{results/selected_tables/sample_size/paper_simulation_section/table_subtype_estimators.tex}
+
+\input{results/selected_tables/sample_size/paper_simulation_section/table_runtime_main.tex}
+\input{results/selected_tables/sample_size/paper_simulation_section/table_rotation_ablation_main.tex}

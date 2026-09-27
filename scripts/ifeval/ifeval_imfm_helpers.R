@@ -23,6 +23,9 @@ script_dir <- local({
 repo_root <- normalizePath(file.path(script_dir, "../.."))
 source(file.path(repo_root, "R", "binary_probit_pretraining.R"))
 source(file.path(repo_root, "R", "binary_probit_refinement.R"))
+source(file.path(repo_root, "R", "riemannian_rotation.R"))
+source(file.path(repo_root, "R", "probit_ifa_em_svd_pretraining.R"))
+source(file.path(repo_root, "R", "canonical_factor_normalization.R"))
 
 # ----------------------------------------------------------------------------
 # Small utilities

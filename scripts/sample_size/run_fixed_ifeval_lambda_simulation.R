@@ -10,15 +10,13 @@
 #
 # Default design:
 #   - IFEval-like unbalanced blocks with at least 30 primary items per factor.
-#   - Nonzero loadings have magnitudes Uniform(2, 3).
+#   - Nonzero loadings have magnitudes Uniform(1, 2).
 #   - Cross-loadings are signed and moderately dense.
 #   - Product MAP is run on all p values.
-#   - Viroli Laplace and diffuse Gaussian Gibbs are run on p <= 1000.
+#   - Viroli Laplace Gibbs is run on p <= 1000.
 #   - Mixture complexity is varied through all-2 versus all-3 component
 #     settings; mixed/alternating G settings are intentionally excluded.
-#   - By default, marginal mixtures use separation 2 for clearer component
-#     separation, and the Laplace/loading penalty is 5 for n=100,200 and
-#     8 for n=400.
+#   - The shared Laplace/loading penalty is 3 for n=100 and 5 for n=200,400.
 
 options(stringsAsFactors = FALSE)
 
@@ -190,17 +188,17 @@ h_values <- parse_ints(get_env("H_VALUES", "5,10"))
 g_config_types <- split_csv(get_env("G_CONFIG_TYPES", "all2,all3"))
 rep_values <- parse_ints(get_env("REP_VALUES", paste(seq_len(25L), collapse = ",")))
 penalty_by_n <- parse_penalty_by_n(
-  get_env("LAMBDA_L1_PENALTY_BY_N", "100=5,200=5,400=8"),
+  get_env("LAMBDA_L1_PENALTY_BY_N", "100=3,200=5,400=5"),
   n_values
 )
-run_label <- get_env("RUN_LABEL", "fixed_ifeval_lambda_min30_u2_3_cp0_05_sep2_npenalty5_8_h5_h10")
+run_label <- get_env("RUN_LABEL", "fixed_ifeval_lambda_min30_u1_2_cp0_05_sep2_npenalty3_5_full_separated")
 out_dir <- get_env("OUT_DIR", file.path(repo_root, "results", "full", run_label))
 chunk_dir <- file.path(out_dir, "chunks")
 dir.create(chunk_dir, recursive = TRUE, showWarnings = FALSE)
 
 run_product_map <- as.logical(get_env("RUN_PRODUCT_MAP", "TRUE"))
 run_viroli_laplace <- as.logical(get_env("RUN_VIROLI_LAPLACE", "TRUE"))
-run_viroli_gaussian <- as.logical(get_env("RUN_VIROLI_GAUSSIAN", "TRUE"))
+run_viroli_gaussian <- as.logical(get_env("RUN_VIROLI_GAUSSIAN", "FALSE"))
 product_task_workers <- as.integer(get_env("TASK_WORKERS_PRODUCT", "1"))
 gibbs_task_workers <- as.integer(get_env("TASK_WORKERS_GIBBS", "1"))
 product_internal_workers <- get_env("PRODUCT_INTERNAL_WORKERS", "18")
@@ -219,16 +217,16 @@ common_env <- c(
   BLOCK_SIZE_MODE = "ifeval_min30",
   LOADING_SIGN_MODE = "block",
   LOADING_STRENGTH = "strong",
-  PRIMARY_LOADING_RANGE = get_env("PRIMARY_LOADING_RANGE", "2,3"),
-  CROSS_LOADING_RANGE = get_env("CROSS_LOADING_RANGE", "2,3"),
+  PRIMARY_LOADING_RANGE = get_env("PRIMARY_LOADING_RANGE", "1,2"),
+  CROSS_LOADING_RANGE = get_env("CROSS_LOADING_RANGE", "1,2"),
   CROSS_LOADING_PROB = get_env("CROSS_LOADING_PROB", "0.05"),
   CROSS_SIGN_MODE = get_env("CROSS_SIGN_MODE", "random"),
   ALIGNMENT_MODE = get_env("ALIGNMENT_MODE", "loadings"),
   MIXTURE_PARAM_MODE = get_env("MIXTURE_PARAM_MODE", "viroli_smoke"),
   MIXTURE_VARIANCE_MODE = get_env("MIXTURE_VARIANCE_MODE", "unequal"),
   VIROLI_SMOKE_G2_PI = get_env("VIROLI_SMOKE_G2_PI", "0.50,0.50"),
-  VIROLI_SMOKE_G2_MU_MULTIPLIER = get_env("VIROLI_SMOKE_G2_MU_MULTIPLIER", "1.0"),
-  VIROLI_SMOKE_G2_SD = get_env("VIROLI_SMOKE_G2_SD", "0.55,0.85"),
+  VIROLI_SMOKE_G2_MU_MULTIPLIER = get_env("VIROLI_SMOKE_G2_MU_MULTIPLIER", "1.35"),
+  VIROLI_SMOKE_G2_SD = get_env("VIROLI_SMOKE_G2_SD", "0.45,0.45"),
   VIROLI_SMOKE_G3_PI = get_env("VIROLI_SMOKE_G3_PI", "0.30,0.40,0.30"),
   VIROLI_SMOKE_G3_MU_MULTIPLIER = get_env("VIROLI_SMOKE_G3_MU_MULTIPLIER", "1.35"),
   VIROLI_SMOKE_G3_SD = get_env("VIROLI_SMOKE_G3_SD", "0.45,0.65,0.45"),
@@ -243,7 +241,7 @@ common_env <- c(
   EM_SVD_ITER = get_env("EM_SVD_ITER", "50"),
   EM_SVD_TOL_LOGLIK = get_env("EM_SVD_TOL_LOGLIK", "1e-5"),
   EM_SVD_TOL_L = get_env("EM_SVD_TOL_L", "1e-4"),
-  EM_SVD_TOL_SUBSPACE = get_env("EM_SVD_TOL_SUBSPACE", "NA"),
+  EM_SVD_TOL_SUBSPACE = get_env("EM_SVD_TOL_SUBSPACE", "2e-3"),
   PRETRAIN_LOADING_PENALTY = get_env("PRETRAIN_LOADING_PENALTY", "5"),
   ROTATION_OPTIMIZER = get_env("ROTATION_OPTIMIZER", "riemannian"),
   ROTATION_ITER = get_env("ROTATION_ITER", "20"),

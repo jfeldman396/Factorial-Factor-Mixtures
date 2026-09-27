@@ -9,3 +9,9 @@ Suggested first tests:
 - permutation/sign alignment recovers a known synthetic loading matrix
 - flattened parameter correlation is unchanged by a signed permutation after alignment
 - Gibbs joint-profile indexing has exactly `G^H` profiles
+
+Run the implemented retained-draw alignment check with:
+
+```sh
+Rscript tests/test_viroli_draw_alignment.R
+```
