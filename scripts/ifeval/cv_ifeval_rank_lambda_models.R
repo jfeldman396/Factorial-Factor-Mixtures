@@ -170,6 +170,48 @@ binary_loglik_masked_lowrank <- function(X, W, alpha, L) {
   sum(ll[W])
 }
 
+masked_posterior_objective <- function(
+    X,
+    W,
+    F_hat,
+    Lambda,
+    alpha,
+    mixture_fits,
+    mixture_prior_weight,
+    lambda_l1_penalty,
+    mu_prior_mean = 0,
+    mu_prior_kappa = 0.05,
+    var_prior_shape = 3,
+    var_prior_scale = 2,
+    weight_prior_alpha = 1) {
+  binary_loglik <- binary_loglik_masked_alpha(
+    X, W, F_hat, Lambda, alpha
+  )
+  mixture_loglik <- mixture_prior_loglik(F_hat, mixture_fits)
+  mixture_parameter_logprior <- mixture_parameter_log_prior(
+    mixture_fits,
+    mu_prior_mean = mu_prior_mean,
+    mu_prior_kappa = mu_prior_kappa,
+    var_prior_shape = var_prior_shape,
+    var_prior_scale = var_prior_scale,
+    weight_prior_alpha = weight_prior_alpha
+  )
+  lambda_logprior <- lambda_laplace_log_prior(
+    Lambda,
+    lambda_l1_penalty = lambda_l1_penalty
+  )
+  list(
+    binary_loglik = binary_loglik,
+    mixture_loglik = mixture_loglik,
+    mixture_parameter_logprior = mixture_parameter_logprior,
+    lambda_logprior = lambda_logprior,
+    posterior_objective = binary_loglik +
+      mixture_prior_weight * mixture_loglik +
+      mixture_parameter_logprior +
+      lambda_logprior
+  )
+}
+
 expected_Z_missing_lowrank <- function(X, W, alpha, L) {
   eta <- sweep(L, 2L, alpha, "+")
   Z <- eta
@@ -379,7 +421,13 @@ initialize_mixture_from_lowrank <- function(lowrank, X, H, G, loading_penalty,
   rownames(Lambda) <- colnames(X)
   colnames(Lambda) <- paste0("factor_", seq_len(H))
   list(F_hat = rot$F_hat, Lambda = Lambda, alpha = lowrank$alpha,
-       mixture_fits = rot$fits, R = rot$R)
+       mixture_fits = rot$fits, R = rot$R,
+       rotation_converged = isTRUE(rot$rotation_converged),
+       rotation_completed_outer = rot$rotation_completed_outer,
+       rotation_all_mixtures_converged = all(vapply(
+         rot$fits, function(z) isTRUE(z$converged), logical(1L)
+       )),
+       rotation_history = rot$rotation_history)
 }
 
 update_one_factor_score_mixture_missing <- function(x_i, obs_i, f_init, Lambda,
@@ -464,7 +512,11 @@ fit_mixture_missing_probit <- function(X, W, H, G, lambda_l1_penalty, fold,
                                        n_mix_starts, mixture_max_iter,
                                        mixture_prior_weight,
                                        maxit_per_subject,
-                                       min_mixture_var) {
+                                       min_mixture_var,
+                                       refinement_objective_tolerance,
+                                       refinement_min_iter,
+                                       refinement_require_mixture_convergence,
+                                       refinement_monotone_tolerance) {
   G_fixed <- if (length(G) == 1L) rep(as.integer(G), H) else as.integer(G)
   if (length(G_fixed) != H) {
     stop("G must be either scalar or a length-H component-count vector.")
@@ -532,8 +584,33 @@ fit_mixture_missing_probit <- function(X, W, H, G, lambda_l1_penalty, fold,
   Lambda <- load$Lambda
   alpha <- load$alpha
 
-  prev_score <- -Inf
+  current_components <- masked_posterior_objective(
+    X = X,
+    W = W,
+    F_hat = F_hat,
+    Lambda = Lambda,
+    alpha = alpha,
+    mixture_fits = mixture_fits,
+    mixture_prior_weight = mixture_prior_weight,
+    lambda_l1_penalty = lambda_l1_penalty
+  )
+  current_posterior <- current_components$posterior_objective
+  refinement_converged <- FALSE
+  refinement_monotone_guard_triggered <- FALSE
+  refinement_completed_iter <- 0L
+  refinement_relative_improvement <- NA_real_
+  refinement_all_mixtures_converged <- all(vapply(
+    mixture_fits, function(z) isTRUE(z$converged), logical(1L)
+  ))
+
   for (iter in seq_len(n_refine_iter)) {
+    previous_F_hat <- F_hat
+    previous_Lambda <- Lambda
+    previous_alpha <- alpha
+    previous_mixture_fits <- mixture_fits
+    previous_components <- current_components
+    previous_posterior <- current_posterior
+
     F_hat <- update_factor_scores_mixture_missing(
       X = X,
       W = W,
@@ -576,27 +653,59 @@ fit_mixture_missing_probit <- function(X, W, H, G, lambda_l1_penalty, fold,
       workers = workers
     )
 
-    train_ll <- binary_loglik_masked_alpha(X, W, F_hat, Lambda, alpha)
+    current_components <- masked_posterior_objective(
+      X = X,
+      W = W,
+      F_hat = F_hat,
+      Lambda = Lambda,
+      alpha = alpha,
+      mixture_fits = mixture_fits,
+      mixture_prior_weight = mixture_prior_weight,
+      lambda_l1_penalty = lambda_l1_penalty
+    )
+    current_posterior <- current_components$posterior_objective
+    objective_improvement <- current_posterior - previous_posterior
+    refinement_relative_improvement <- objective_improvement /
+      (1 + abs(previous_posterior))
+    refinement_all_mixtures_converged <- all(vapply(
+      mixture_fits, function(z) isTRUE(z$converged), logical(1L)
+    ))
+
+    rejected <- is.finite(objective_improvement) &&
+      objective_improvement < -refinement_monotone_tolerance
+    if (rejected) {
+      F_hat <- previous_F_hat
+      Lambda <- previous_Lambda
+      alpha <- previous_alpha
+      mixture_fits <- previous_mixture_fits
+      current_components <- previous_components
+      current_posterior <- previous_posterior
+      refinement_relative_improvement <- 0
+      refinement_monotone_guard_triggered <- TRUE
+    }
+
     history <- rbind(history, data.frame(
       stage = "refine",
       iteration = iter,
-      train_loglik_per_response = train_ll / sum(W),
-      relative_loglik_change = if (is.finite(prev_score)) {
-        abs(train_ll / sum(W) - prev_score)
-      } else {
-        NA_real_
-      },
+      train_loglik_per_response = current_components$binary_loglik / sum(W),
+      relative_loglik_change = refinement_relative_improvement,
       relative_L_change = NA_real_,
       left_subspace_max_sin_theta = NA_real_,
       left_subspace_projection_distance = NA_real_,
       iteration_seconds = NA_real_,
       mixture_loglik = mixture_prior_loglik(F_hat, mixture_fits)
     ))
-    if (iter >= 3L && is.finite(prev_score) &&
-        abs(train_ll / sum(W) - prev_score) < 1e-4) {
+
+    refinement_completed_iter <- iter
+    if (rejected) break
+    if (iter >= refinement_min_iter &&
+        is.finite(refinement_relative_improvement) &&
+        refinement_relative_improvement <= refinement_objective_tolerance &&
+        (!isTRUE(refinement_require_mixture_convergence) ||
+         refinement_all_mixtures_converged)) {
+      refinement_converged <- TRUE
       break
     }
-    prev_score <- train_ll / sum(W)
   }
 
   canonical <- canonical_normalize_factor_parameters(
@@ -624,6 +733,15 @@ fit_mixture_missing_probit <- function(X, W, H, G, lambda_l1_penalty, fold,
     mixture_fits = mixture_fits,
     pretraining_converged = lowrank$converged,
     pretraining_convergence_reason = lowrank$convergence_reason,
+    pretraining_completed_iter = max(lowrank$history$iteration),
+    rotation_converged = current$rotation_converged,
+    rotation_completed_outer = current$rotation_completed_outer,
+    rotation_all_mixtures_converged = current$rotation_all_mixtures_converged,
+    refinement_converged = refinement_converged,
+    refinement_completed_iter = refinement_completed_iter,
+    refinement_relative_improvement = refinement_relative_improvement,
+    refinement_all_mixtures_converged = refinement_all_mixtures_converged,
+    refinement_monotone_guard_triggered = refinement_monotone_guard_triggered,
     canonical_normalization = canonical[c(
       "location_before", "scale_before", "signs", "permutation",
       "max_abs_eta_difference", "rms_eta_difference"
@@ -650,6 +768,9 @@ make_summary <- function(scores) {
   if (!"G_config" %in% names(scores)) {
     scores$G_config <- ifelse(is.na(scores$G), NA_character_, as.character(scores$G))
   }
+  if (!"fit_converged" %in% names(scores)) {
+    scores$fit_converged <- FALSE
+  }
   split_key <- paste(
     scores$G_config,
     scores$H,
@@ -663,6 +784,8 @@ make_summary <- function(scores) {
       H = d$H[1L],
       lambda_l1_penalty = d$lambda_l1_penalty[1L],
       n_completed_folds = nrow(d),
+      n_converged_folds = sum(d$fit_converged %in% TRUE),
+      all_folds_converged = nrow(d) == K_folds && all(d$fit_converged %in% TRUE),
       mean_heldout_loglik_per_response = mean(d$heldout_loglik_per_response),
       sd_heldout_loglik_per_response = if (nrow(d) > 1L) sd(d$heldout_loglik_per_response) else NA_real_,
       se_heldout_loglik_per_response = if (nrow(d) > 1L) sd(d$heldout_loglik_per_response) / sqrt(nrow(d)) else NA_real_,
@@ -752,11 +875,26 @@ refresh_outputs <- function(scores_path, out_dir) {
   write.csv(summary_scores, file.path(out_dir, "ifeval_rank_lambda_cv_summary_partial.csv"),
             row.names = FALSE)
 
-  complete <- summary_scores[summary_scores$n_completed_folds == max(summary_scores$n_completed_folds), ]
-  selected <- complete[which.max(complete$mean_heldout_loglik_per_response), , drop = FALSE]
-  rownames(selected) <- NULL
-  write.csv(selected, file.path(out_dir, "ifeval_rank_lambda_selected_by_heldout_ll_partial.csv"),
-            row.names = FALSE)
+  complete <- summary_scores[
+    summary_scores$n_completed_folds == K_folds &
+      summary_scores$all_folds_converged %in% TRUE,
+    ,
+    drop = FALSE
+  ]
+  selected_path <- file.path(
+    out_dir, "ifeval_rank_lambda_selected_by_heldout_ll_partial.csv"
+  )
+  if (nrow(complete)) {
+    selected <- complete[
+      which.max(complete$mean_heldout_loglik_per_response),
+      ,
+      drop = FALSE
+    ]
+    rownames(selected) <- NULL
+    write.csv(selected, selected_path, row.names = FALSE)
+  } else if (file.exists(selected_path)) {
+    unlink(selected_path)
+  }
   if (tolower(Sys.getenv("REFRESH_PLOTS", "TRUE")) %in% c("false", "0", "no")) {
     return(invisible(NULL))
   }
@@ -818,8 +956,19 @@ workers <- resolve_workers(as.integer(Sys.getenv("WORKERS", "6")))
 seed <- as.integer(Sys.getenv("SEED", "20260812"))
 resume_existing <- isTRUE(tolower(Sys.getenv("RESUME_EXISTING", "TRUE")) %in% c("true", "1", "yes"))
 
-n_aug_iter <- as.integer(Sys.getenv("PRETRAIN_AUG_ITER", "50"))
-n_refine_iter <- as.integer(Sys.getenv("REFINE_ITER", "25"))
+n_aug_iter <- as.integer(Sys.getenv("PRETRAIN_AUG_ITER", "200"))
+n_refine_iter <- as.integer(Sys.getenv("REFINE_ITER", "100"))
+refinement_objective_tolerance <- as.numeric(
+  Sys.getenv("REFINE_OBJECTIVE_TOLERANCE", "1e-3")
+)
+refinement_min_iter <- as.integer(Sys.getenv("REFINE_MIN_ITER", "2"))
+refinement_require_mixture_convergence <- isTRUE(
+  tolower(Sys.getenv("REFINE_REQUIRE_MIXTURE_CONVERGENCE", "TRUE")) %in%
+    c("true", "1", "yes")
+)
+refinement_monotone_tolerance <- as.numeric(
+  Sys.getenv("REFINE_MONOTONE_TOLERANCE", "1e-8")
+)
 pretrain_z_update <- Sys.getenv("PRETRAIN_Z_UPDATE", "expectation")
 if (!pretrain_z_update %in% c("sample", "expectation")) {
   stop("PRETRAIN_Z_UPDATE must be either 'sample' or 'expectation'.")
@@ -831,7 +980,7 @@ rotation_optimizer <- match.arg(
   Sys.getenv("ROTATION_OPTIMIZER", "riemannian"),
   c("riemannian", "givens")
 )
-max_outer <- as.integer(Sys.getenv("MAX_OUTER", "3"))
+max_outer <- as.integer(Sys.getenv("MAX_OUTER", "20"))
 n_mix_starts <- as.integer(Sys.getenv("N_MIX_STARTS", "2"))
 mixture_max_iter <- as.integer(Sys.getenv("MIXTURE_MAX_ITER", "15"))
 mixture_prior_weight <- as.numeric(Sys.getenv("MIXTURE_PRIOR_WEIGHT", "1"))
@@ -903,6 +1052,13 @@ message("lambda_l1 grid: ", paste(lambda_grid, collapse = ", "))
 message("Folds: ", K_folds, "; MAP refinement; workers=", workers)
 message("Pretraining Z update: ", pretrain_z_update)
 message("Rotation: ", rotation_optimizer, "; FastICA starts: ", rotation_ica_starts)
+message(
+  "Convergence: pretrain max=", n_aug_iter,
+  ", subspace tol=2e-3; rotation max=", max_outer,
+  "; refinement max=", n_refine_iter,
+  ", posterior tol=", refinement_objective_tolerance,
+  ", require mixture convergence=", refinement_require_mixture_convergence
+)
 message("Output directory: ", normalizePath(out_dir, mustWork = FALSE))
 
 method_name <- "independent_mixture_probit"
@@ -961,7 +1117,11 @@ for (G in G_grid) {
             mixture_max_iter = mixture_max_iter,
             mixture_prior_weight = mixture_prior_weight,
             maxit_per_subject = maxit_per_subject,
-            min_mixture_var = min_mixture_var
+            min_mixture_var = min_mixture_var,
+            refinement_objective_tolerance = refinement_objective_tolerance,
+            refinement_min_iter = refinement_min_iter,
+            refinement_require_mixture_convergence = refinement_require_mixture_convergence,
+            refinement_monotone_tolerance = refinement_monotone_tolerance
           )
 
           elapsed <- proc.time()[["elapsed"]] - start_time
@@ -973,6 +1133,29 @@ for (G in G_grid) {
           sc$train_loglik_per_response <- train_total_ll / sum(W)
           sc$n_train <- sum(W)
           sc$fit_seconds <- elapsed
+          sc$pretraining_converged <- isTRUE(fit$pretraining_converged)
+          sc$pretraining_convergence_reason <- fit$pretraining_convergence_reason
+          sc$pretraining_completed_iter <- fit$pretraining_completed_iter
+          sc$rotation_converged <- isTRUE(fit$rotation_converged)
+          sc$rotation_completed_outer <- fit$rotation_completed_outer
+          sc$rotation_all_mixtures_converged <- isTRUE(
+            fit$rotation_all_mixtures_converged
+          )
+          sc$refinement_converged <- isTRUE(fit$refinement_converged)
+          sc$refinement_completed_iter <- fit$refinement_completed_iter
+          sc$refinement_relative_improvement <- fit$refinement_relative_improvement
+          sc$refinement_all_mixtures_converged <- isTRUE(
+            fit$refinement_all_mixtures_converged
+          )
+          sc$refinement_monotone_guard_triggered <- isTRUE(
+            fit$refinement_monotone_guard_triggered
+          )
+          sc$fit_converged <- isTRUE(sc$pretraining_converged) &&
+            isTRUE(sc$rotation_converged) &&
+            isTRUE(sc$refinement_converged) &&
+            isTRUE(sc$rotation_all_mixtures_converged) &&
+            (!isTRUE(refinement_require_mixture_convergence) ||
+             isTRUE(sc$refinement_all_mixtures_converged))
 
           row <- cbind(
             method = method_name,
@@ -1023,7 +1206,20 @@ scores <- filter_scores_to_requested_grid(scores)
 summary_scores <- make_summary(scores)
 write.csv(summary_scores, file.path(out_dir, "ifeval_rank_lambda_cv_summary.csv"),
           row.names = FALSE)
-selected <- summary_scores[which.max(summary_scores$mean_heldout_loglik_per_response), , drop = FALSE]
+complete <- summary_scores[
+  summary_scores$n_completed_folds == K_folds &
+    summary_scores$all_folds_converged %in% TRUE,
+  ,
+  drop = FALSE
+]
+if (!nrow(complete)) {
+  stop("No candidate completed all folds with every fitting stage converged.")
+}
+selected <- complete[
+  which.max(complete$mean_heldout_loglik_per_response),
+  ,
+  drop = FALSE
+]
 rownames(selected) <- NULL
 write.csv(selected, file.path(out_dir, "ifeval_rank_lambda_selected_by_heldout_ll.csv"),
           row.names = FALSE)
