@@ -1,0 +1,2 @@
+"method","H","lambda_l1_penalty","mean_loglik","se_loglik","mean_accuracy","mean_brier","n_completed_folds","heldout_factor_failures","mean_fit_seconds","total_fit_seconds","wall_time_proxy_seconds"
+"Gaussian probit Gibbs",4,4,-0.30879401137363,0.00876076259352801,0.870081007409683,0.0938873010535508,5,0,63.8172,319.086,63.97

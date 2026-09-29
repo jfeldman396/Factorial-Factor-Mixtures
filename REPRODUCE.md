@@ -115,26 +115,72 @@ zsh scripts/ifeval/build_ifeval_threshold_matrices.sh
 
 Set `LOCAL_SNAPSHOT_DIR` if the OpenEval snapshot is not at the default Hugging Face cache location.
 
-Run rank/component/penalty selection, selected-model refitting, and interpretation for all three thresholds with:
+The paper analysis uses the strict threshold-1 matrix and selects the rank,
+factor-specific component counts, and loading penalty for prediction on unseen
+LLMs. Run the five-fold few-shot row-wise search with:
 
 ```sh
-OUT_BASE=results/full/ifeval_threshold_sensitivity_current \
-  WORKERS=18 \
-  zsh scripts/ifeval/run_ifeval_threshold_analyses.sh
+MATRIX_PATH=data/ifeval_threshold_1/openeval_ifeval_only_binary_matrix.csv \
+WORKERS=18 \
+OUT_DIR=results/full/ifeval_rowwise_fewshot_cv \
+SEED=1 \
+zsh scripts/ifeval/run_ifeval_rowwise_fewshot_cv.sh
 ```
 
-The default search uses `H = 2, ..., 8`, factor-specific component counts in
-`{1, 2, 3}` with at most one Gaussian coordinate, and loading penalties
-`{0, 1, 2, 4, 8, 12}` under three-fold response-level cross-validation.
+This uses five row folds. For each unseen LLM, 20% of its observed responses
+estimate its MAP factor vector and the remaining 80% evaluate prediction, with
+three reveal repetitions. All candidates use identical folds and reveal masks.
+The grid is `H = 2, ..., 8`, `G_h in {1, 2, 3}` with at most one Gaussian
+coordinate and permutation-equivalent component-count configurations removed,
+and `lambda in {0, 1, 2, 4, 8, 12}`. It contains 462 candidates and 2,310
+training fits. The completed run selected `H=4`, `G=(1,3,3,3)`, `lambda=4`;
+the near-tied `G=(1,2,2,3)` component-count multiset is used for the paper's
+more parsimonious interpretation.
+
+Attach that multiset to the displayed factor orientation as `G=(2,2,3,1)` and
+refit on the full matrix with:
+
+```sh
+BASE_FIT=results/full/ifeval_rowwise_fewshot_cv/rowwise_cv_selected_full_data_fit.rds \
+MATRIX_PATH=data/ifeval_threshold_1/openeval_ifeval_only_binary_matrix.csv \
+ITEM_METADATA_PATH=data/ifeval_threshold_1/openeval_item_metadata.csv \
+OUT_DIR=results/full/ifeval_rowwise_fewshot_cv/alternative_H4_G2-2-3-1_fixed_orientation_lambda4 \
+G_FIXED=2,2,3,1 \
+LAMBDA_L1_PENALTY=4 \
+WORKERS=18 \
+SEED=20260929 \
+Rscript scripts/ifeval/refit_ifeval_fixed_orientation_components.R
+```
+
+Fit the matched rank-4 Gaussian probit Gibbs model using exactly the saved row
+folds and reveal masks:
+
+```sh
+PIFA_CV_DIR=results/full/ifeval_rowwise_fewshot_cv \
+MATRIX_PATH=data/ifeval_threshold_1/openeval_ifeval_only_binary_matrix.csv \
+OUT_DIR=results/full/ifeval_rowwise_fewshot_cv/gaussian_H4_lambda4_rowwise_fewshot_cv \
+H_FIXED=4 \
+LAMBDA_L1_PENALTY=4 \
+GIBBS_ITER=2000 \
+GIBBS_BURN=1000 \
+FOLD_WORKERS=5 \
+SEED=1 \
+Rscript scripts/ifeval/run_ifeval_gaussian_rowwise_fewshot_cv.R
+```
+
+Export the compact CSV and figure release after all three steps complete:
+
+```sh
+IFEVAL_ROWWISE_ROOT=results/full/ifeval_rowwise_fewshot_cv \
+IFEVAL_FIXED_ROOT=results/full/ifeval_rowwise_fewshot_cv/alternative_H4_G2-2-3-1_fixed_orientation_lambda4 \
+IFEVAL_GAUSSIAN_ROOT=results/full/ifeval_rowwise_fewshot_cv/gaussian_H4_lambda4_rowwise_fewshot_cv \
+Rscript scripts/ifeval/export_ifeval_rowwise_release.R
+```
+
+The full design, output dictionary, and completed analysis summary are in
+`docs/ifeval_rowwise_fewshot_cv.md`.
 
 The workflow is resumable. Intermediate fits are written to `results/full/`; final analysis-ready outputs belong in `results/saved/ifeval/`, and paper artifacts belong in `results/selected_plots/ifeval/` and `results/selected_tables/ifeval/`.
-
-To export a completed run manually, use:
-
-```sh
-IFEVAL_FULL_ROOT=results/full/ifeval_threshold_sensitivity_current \
-  Rscript scripts/ifeval/export_ifeval_release.R
-```
 
 ## Tests
 
@@ -143,6 +189,8 @@ Run the retained Gibbs identification and subtype checks with:
 ```sh
 Rscript tests/test_viroli_draw_alignment.R
 Rscript tests/test_viroli_mixture_updates_and_subtype_mode.R
+Rscript tests/test_pifa_rowwise_cv.R
+Rscript scripts/ifeval/validate_ifeval_rowwise_release.R
 ```
 
 ## Saved Results Contract

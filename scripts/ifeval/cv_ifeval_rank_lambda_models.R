@@ -13,7 +13,13 @@ options(stringsAsFactors = FALSE)
 
 cmd_args <- commandArgs(trailingOnly = FALSE)
 file_arg <- grep("^--file=", cmd_args, value = TRUE)
-script_dir <- if (length(file_arg)) {
+source_files <- vapply(sys.frames(), function(frame) {
+  if (!is.null(frame$ofile)) frame$ofile else NA_character_
+}, character(1L))
+source_files <- source_files[!is.na(source_files)]
+script_dir <- if (length(source_files)) {
+  dirname(normalizePath(tail(source_files, 1L), mustWork = FALSE))
+} else if (length(file_arg)) {
   dirname(normalizePath(sub("^--file=", "", file_arg[1L]), mustWork = FALSE))
 } else {
   getwd()
@@ -433,11 +439,20 @@ initialize_mixture_from_lowrank <- function(lowrank, X, H, G, loading_penalty,
 update_one_factor_score_mixture_missing <- function(x_i, obs_i, f_init, Lambda,
                                                     alpha, mixture_fits,
                                                     mixture_prior_weight,
-                                                    maxit = 50L) {
+                                                    maxit = 50L,
+                                                    factor_score_bound = Inf,
+                                                    return_diagnostics = FALSE) {
   y <- as.numeric(x_i[obs_i])
   L <- Lambda[obs_i, , drop = FALSE]
   a <- alpha[obs_i]
   H <- length(f_init)
+  if (length(factor_score_bound) != 1L || is.na(factor_score_bound) ||
+      factor_score_bound <= 0) {
+    stop("factor_score_bound must be a positive scalar or Inf.")
+  }
+  lower <- rep(-factor_score_bound, H)
+  upper <- rep(factor_score_bound, H)
+  f_init <- pmin(pmax(as.numeric(f_init), lower), upper)
 
   objective <- function(f) {
     eta <- a + as.numeric(L %*% f)
@@ -467,22 +482,42 @@ update_one_factor_score_mixture_missing <- function(x_i, obs_i, f_init, Lambda,
 
   opt <- tryCatch(
     optim(
-      par = as.numeric(f_init),
+      par = f_init,
       fn = objective,
       gr = gradient,
       method = "L-BFGS-B",
+      lower = lower,
+      upper = upper,
       control = list(maxit = maxit, factr = 1e7)
     ),
     error = function(e) NULL
   )
-  if (is.null(opt) || !all(is.finite(opt$par))) f_init else opt$par
+  if (is.null(opt) || !all(is.finite(opt$par))) {
+    result <- list(
+      par = f_init,
+      value = objective(f_init),
+      convergence = 100L,
+      counts = c("function" = NA_integer_, "gradient" = NA_integer_),
+      message = "factor optimization failed"
+    )
+  } else {
+    result <- list(
+      par = as.numeric(opt$par),
+      value = as.numeric(opt$value),
+      convergence = as.integer(opt$convergence),
+      counts = opt$counts,
+      message = if (is.null(opt$message)) "" else as.character(opt$message)
+    )
+  }
+  if (isTRUE(return_diagnostics)) result else result$par
 }
 
 update_factor_scores_mixture_missing <- function(X, W, F_hat, Lambda, alpha,
                                                  mixture_fits,
                                                  mixture_prior_weight,
                                                  maxit_per_subject,
-                                                 workers) {
+                                                 workers,
+                                                 factor_score_bound) {
   H <- ncol(F_hat)
   rows <- parallel_lapply(seq_len(nrow(X)), function(i) {
     update_one_factor_score_mixture_missing(
@@ -493,7 +528,8 @@ update_factor_scores_mixture_missing <- function(X, W, F_hat, Lambda, alpha,
       alpha = alpha,
       mixture_fits = mixture_fits,
       mixture_prior_weight = mixture_prior_weight,
-      maxit = maxit_per_subject
+      maxit = maxit_per_subject,
+      factor_score_bound = factor_score_bound
     )
   }, parallel = workers > 1L, workers = workers)
   out <- matrix(unlist(rows), ncol = H, byrow = TRUE)
@@ -516,7 +552,9 @@ fit_mixture_missing_probit <- function(X, W, H, G, lambda_l1_penalty, fold,
                                        refinement_objective_tolerance,
                                        refinement_min_iter,
                                        refinement_require_mixture_convergence,
-                                       refinement_monotone_tolerance) {
+                                       refinement_monotone_tolerance,
+                                       normalize_factor_scale,
+                                       factor_score_bound) {
   G_fixed <- if (length(G) == 1L) rep(as.integer(G), H) else as.integer(G)
   if (length(G_fixed) != H) {
     stop("G must be either scalar or a length-H component-count vector.")
@@ -578,6 +616,26 @@ fit_mixture_missing_probit <- function(X, W, H, G, lambda_l1_penalty, fold,
   alpha <- current$alpha
   mixture_fits <- current$mixture_fits
 
+  if (isTRUE(normalize_factor_scale)) {
+    located <- normalize_refinement_factor_location(
+      F_hat = F_hat,
+      Lambda = Lambda,
+      alpha = alpha,
+      mixture_fits = mixture_fits
+    )
+    scaled <- normalize_refinement_factor_scale(
+      F_hat = located$F_hat,
+      Lambda = Lambda,
+      mixture_fits = located$mixture_fits,
+      target_scale = 1,
+      scale_method = "sd"
+    )
+    F_hat <- scaled$F_hat
+    Lambda <- scaled$Lambda
+    alpha <- located$alpha
+    mixture_fits <- scaled$mixture_fits
+  }
+
   load <- update_loadings_probit_missing(
     X, W, F_hat, Lambda, alpha, lambda_l1_penalty, workers
   )
@@ -620,7 +678,8 @@ fit_mixture_missing_probit <- function(X, W, H, G, lambda_l1_penalty, fold,
       mixture_fits = mixture_fits,
       mixture_prior_weight = mixture_prior_weight,
       maxit_per_subject = maxit_per_subject,
-      workers = workers
+      workers = workers,
+      factor_score_bound = factor_score_bound
     )
     located <- normalize_refinement_factor_location(
       F_hat = F_hat,
@@ -631,6 +690,19 @@ fit_mixture_missing_probit <- function(X, W, H, G, lambda_l1_penalty, fold,
     F_hat <- located$F_hat
     alpha <- located$alpha
     mixture_fits <- located$mixture_fits
+
+    if (isTRUE(normalize_factor_scale)) {
+      scaled <- normalize_refinement_factor_scale(
+        F_hat = F_hat,
+        Lambda = Lambda,
+        mixture_fits = mixture_fits,
+        target_scale = 1,
+        scale_method = "sd"
+      )
+      F_hat <- scaled$F_hat
+      Lambda <- scaled$Lambda
+      mixture_fits <- scaled$mixture_fits
+    }
 
     load <- update_loadings_probit_missing(
       X, W, F_hat, Lambda, alpha, lambda_l1_penalty, workers
@@ -742,6 +814,8 @@ fit_mixture_missing_probit <- function(X, W, H, G, lambda_l1_penalty, fold,
     refinement_relative_improvement = refinement_relative_improvement,
     refinement_all_mixtures_converged = refinement_all_mixtures_converged,
     refinement_monotone_guard_triggered = refinement_monotone_guard_triggered,
+    normalize_factor_scale = normalize_factor_scale,
+    factor_score_bound = factor_score_bound,
     canonical_normalization = canonical[c(
       "location_before", "scale_before", "signs", "permutation",
       "max_abs_eta_difference", "rms_eta_difference"
@@ -835,6 +909,36 @@ write_cv_plots <- function(summary_scores, out_dir) {
     )
     abline(v = max(top$mean_heldout_loglik_per_response, na.rm = TRUE),
            col = "#B23A48", lty = 2)
+
+    top_accuracy <- summary_scores[
+      order(summary_scores$mean_heldout_accuracy, decreasing = TRUE),
+    ]
+    top_accuracy <- head(top_accuracy, 30L)
+    write.csv(
+      top_accuracy,
+      file.path(out_dir, "rank_lambda_top_candidates_by_heldout_accuracy.csv"),
+      row.names = FALSE
+    )
+
+    png(file.path(out_dir, "rank_lambda_top_candidates_by_heldout_accuracy.png"),
+        width = 2400, height = 1700, res = 170)
+    labels_accuracy <- sprintf(
+      "H=%s; G=[%s]; lambda=%s; folds=%s",
+      top_accuracy$H,
+      ifelse(is.na(top_accuracy$G_config), "NA", top_accuracy$G_config),
+      top_accuracy$lambda_l1_penalty,
+      top_accuracy$n_completed_folds
+    )
+    dotchart(
+      rev(top_accuracy$mean_heldout_accuracy),
+      labels = rev(labels_accuracy),
+      pch = 19,
+      xlab = "held-out classification accuracy",
+      main = "Top IFEval candidates by held-out accuracy"
+    )
+    abline(v = max(top_accuracy$mean_heldout_accuracy, na.rm = TRUE),
+           col = "#B23A48", lty = 2)
+    dev.off()
     return(invisible(NULL))
   }
 
@@ -924,6 +1028,7 @@ run_rscript_with_env <- function(script_path, env_values) {
   invisible(status)
 }
 
+if (!isTRUE(getOption("pifa.cv.functions_only", FALSE))) {
 matrix_path <- Sys.getenv(
   "MATRIX_PATH",
   file.path(repo_root, "data", "ifeval", "openeval_ifeval_only_binary_matrix.csv")
@@ -941,6 +1046,19 @@ H_grid <- H_grid[H_grid >= 1L & H_grid <= max_feasible_H]
 G_grid <- parse_int_grid(Sys.getenv("G_GRID"), default = c(2L, 3L))
 G_mode <- Sys.getenv("G_MODE", "fixed")
 G_mode <- match.arg(G_mode, c("fixed", "column_grid"))
+fixed_G_config_text <- Sys.getenv("FIXED_G_CONFIG", "")
+fixed_G_config <- if (nzchar(fixed_G_config_text)) {
+  parse_int_grid(fixed_G_config_text, default = integer())
+} else {
+  NULL
+}
+if (!is.null(fixed_G_config)) {
+  if (length(H_grid) != 1L || length(fixed_G_config) != H_grid[1L]) {
+    stop("FIXED_G_CONFIG must contain exactly H entries and requires a single H_GRID value.")
+  }
+  if (any(fixed_G_config < 1L)) stop("FIXED_G_CONFIG entries must be positive integers.")
+  G_grid <- max(fixed_G_config)
+}
 G_component_values <- parse_int_grid(
   Sys.getenv("G_COMPONENT_VALUES"),
   default = c(2L, 3L)
@@ -969,6 +1087,15 @@ refinement_require_mixture_convergence <- isTRUE(
 refinement_monotone_tolerance <- as.numeric(
   Sys.getenv("REFINE_MONOTONE_TOLERANCE", "1e-8")
 )
+normalize_factor_scale <- isTRUE(
+  tolower(Sys.getenv("NORMALIZE_FACTOR_SCALE", "TRUE")) %in%
+    c("true", "1", "yes")
+)
+factor_score_bound <- as.numeric(Sys.getenv("FACTOR_SCORE_BOUND", "5"))
+if (length(factor_score_bound) != 1L || is.na(factor_score_bound) ||
+    factor_score_bound <= 0) {
+  stop("FACTOR_SCORE_BOUND must be a positive scalar or Inf.")
+}
 pretrain_z_update <- Sys.getenv("PRETRAIN_Z_UPDATE", "expectation")
 if (!pretrain_z_update %in% c("sample", "expectation")) {
   stop("PRETRAIN_Z_UPDATE must be either 'sample' or 'expectation'.")
@@ -1043,6 +1170,9 @@ message("Method: independent_mixture_probit")
 message("H grid: ", paste(H_grid, collapse = ", "))
 message("G grid: ", paste(G_grid, collapse = ", "))
 message("G mode: ", G_mode)
+if (!is.null(fixed_G_config)) {
+  message("Fixed G config: ", paste(fixed_G_config, collapse = ", "))
+}
 if (G_mode == "column_grid") {
   message("Columnwise component values: ", paste(G_component_values, collapse = ", "))
   message("Max Gaussian coordinates: ", max_gaussian_coords)
@@ -1057,14 +1187,18 @@ message(
   ", subspace tol=2e-3; rotation max=", max_outer,
   "; refinement max=", n_refine_iter,
   ", posterior tol=", refinement_objective_tolerance,
-  ", require mixture convergence=", refinement_require_mixture_convergence
+  ", require mixture convergence=", refinement_require_mixture_convergence,
+  ", normalize factor scale=", normalize_factor_scale,
+  ", factor score bound=", factor_score_bound
 )
 message("Output directory: ", normalizePath(out_dir, mustWork = FALSE))
 
 method_name <- "independent_mixture_probit"
 for (G in G_grid) {
   for (H in H_grid) {
-    G_configs <- if (G_mode == "column_grid") {
+    G_configs <- if (!is.null(fixed_G_config)) {
+      list(fixed_G_config)
+    } else if (G_mode == "column_grid") {
       expand_columnwise_G_configs(
         H,
         component_values = G_component_values,
@@ -1121,7 +1255,9 @@ for (G in G_grid) {
             refinement_objective_tolerance = refinement_objective_tolerance,
             refinement_min_iter = refinement_min_iter,
             refinement_require_mixture_convergence = refinement_require_mixture_convergence,
-            refinement_monotone_tolerance = refinement_monotone_tolerance
+            refinement_monotone_tolerance = refinement_monotone_tolerance,
+            normalize_factor_scale = normalize_factor_scale,
+            factor_score_bound = factor_score_bound
           )
 
           elapsed <- proc.time()[["elapsed"]] - start_time
@@ -1150,6 +1286,8 @@ for (G in G_grid) {
           sc$refinement_monotone_guard_triggered <- isTRUE(
             fit$refinement_monotone_guard_triggered
           )
+          sc$normalize_factor_scale <- isTRUE(fit$normalize_factor_scale)
+          sc$factor_score_bound <- fit$factor_score_bound
           sc$fit_converged <- isTRUE(sc$pretraining_converged) &&
             isTRUE(sc$rotation_converged) &&
             isTRUE(sc$refinement_converged) &&
@@ -1193,6 +1331,8 @@ for (G in G_grid) {
 
           refresh_outputs(scores_path, out_dir)
           message("  heldout ll/resp=", signif(sc$heldout_loglik_per_response, 4),
+                  ", heldout accuracy=", signif(sc$heldout_accuracy, 4),
+                  ", heldout Brier=", signif(sc$heldout_brier, 4),
                   ", train ll/resp=", signif(sc$train_loglik_per_response, 4),
                   ", seconds=", signif(elapsed, 4))
         }
@@ -1261,7 +1401,9 @@ if (fit_selected_after_cv) {
       PRETRAIN_AUG_ITER = as.character(n_aug_iter),
       REFINE_ITER = as.character(n_refine_iter),
       MIXTURE_MAX_ITER = as.character(mixture_max_iter),
-      REQUIRE_MIXTURE_CONVERGENCE = "TRUE"
+      REQUIRE_MIXTURE_CONVERGENCE = "TRUE",
+      FACTOR_SCORE_BOUND = as.character(factor_score_bound),
+      NORMALIZE_FACTOR_SCALE = if (normalize_factor_scale) "TRUE" else "FALSE"
     )
   )
 }
@@ -1269,3 +1411,4 @@ if (fit_selected_after_cv) {
 cat("\nSelected models by held-out predictive log likelihood:\n")
 print(selected)
 cat("\nOutputs saved in: ", normalizePath(out_dir), "\n", sep = "")
+}

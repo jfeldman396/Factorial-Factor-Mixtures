@@ -41,9 +41,14 @@ viroli_rinvgauss <- function(mu, lambda) {
 viroli_sample_binary_Z <- function(X, F, Lambda, alpha) {
   mean_mat <- sweep(F %*% t(Lambda), 2L, alpha, "+")
   Z <- matrix(NA_real_, nrow(X), ncol(X))
-  one <- X == 1
+  missing <- is.na(X)
+  one <- !missing & X == 1
+  zero <- !missing & X == 0
   Z[one] <- rtruncnorm_binary_vec(mean_mat[one], 1, 0, Inf)
-  Z[!one] <- rtruncnorm_binary_vec(mean_mat[!one], 1, -Inf, 0)
+  Z[zero] <- rtruncnorm_binary_vec(mean_mat[zero], 1, -Inf, 0)
+  # Missing binary outcomes impose no truncation. Sampling their latent values
+  # from the unrestricted Gaussian preserves a valid missing-data Gibbs step.
+  Z[missing] <- rnorm(sum(missing), mean = mean_mat[missing], sd = 1)
   Z
 }
 
@@ -583,6 +588,48 @@ align_viroli_draw_to_reference <- function(
   )
 }
 
+align_viroli_gaussian_draw_to_reference <- function(
+    reference_Lambda,
+    F,
+    Lambda,
+    C,
+    pi_mat,
+    mu_mat,
+    sig2_mat) {
+  reference_Lambda <- as.matrix(reference_Lambda)
+  F <- as.matrix(F)
+  Lambda <- as.matrix(Lambda)
+  if (!identical(dim(reference_Lambda), dim(Lambda))) {
+    stop("reference_Lambda and Lambda must have identical dimensions.")
+  }
+
+  # For spherical Gaussian factors, every orthogonal rotation is equivalent.
+  # Align the complete loading basis before averaging posterior draws; signed
+  # permutations alone are insufficient for this continuous indeterminacy.
+  cross_basis <- crossprod(Lambda, reference_Lambda)
+  decomp <- svd(cross_basis)
+  Q <- decomp$u %*% t(decomp$v)
+  F_aligned <- F %*% Q
+  Lambda_aligned <- Lambda %*% Q
+  total_cost <- sum((Lambda_aligned - reference_Lambda)^2)
+
+  list(
+    F = F_aligned,
+    Lambda = Lambda_aligned,
+    C = C,
+    pi = pi_mat,
+    mu = mu_mat,
+    sig2 = sig2_mat,
+    alignment = list(
+      n_permuted_factors = 0L,
+      n_sign_flips = 0L,
+      total_cost = total_cost,
+      orthogonal_matrix = Q,
+      method = "orthogonal_procrustes"
+    )
+  )
+}
+
 viroli_require_canonical_normalizer <- function() {
   if (exists("canonical_normalize_factor_parameters", mode = "function")) {
     return(invisible(TRUE))
@@ -676,8 +723,19 @@ initialize_viroli_probit_state <- function(X, H, G, seed = 1L) {
   n <- nrow(X)
   G <- normalize_G_fixed(G, H)
 
-  alpha0 <- qnorm((colSums(X) + 0.5) / (n + 1))
-  Z <- initialize_binary_Z(X, seed = seed, alpha = alpha0)
+  n_observed <- colSums(!is.na(X))
+  if (any(n_observed == 0L)) {
+    stop("Every item must have at least one observed response.")
+  }
+  alpha0 <- qnorm((colSums(X, na.rm = TRUE) + 0.5) / (n_observed + 1))
+  mean0 <- matrix(alpha0, nrow = n, ncol = ncol(X), byrow = TRUE)
+  Z <- matrix(NA_real_, n, ncol(X))
+  missing <- is.na(X)
+  one <- !missing & X == 1
+  zero <- !missing & X == 0
+  Z[one] <- rtruncnorm_binary_vec(mean0[one], 1, 0, Inf)
+  Z[zero] <- rtruncnorm_binary_vec(mean0[zero], 1, -Inf, 0)
+  Z[missing] <- rnorm(sum(missing), mean = mean0[missing], sd = 1)
   svd_out <- svd_scores_from_Z(Z, H = H, center_Z = TRUE)
   F <- scale(svd_out$S)
   if (any(!is.finite(F))) F <- matrix(rnorm(n * H), n, H)
@@ -1180,6 +1238,7 @@ fit_viroli_probit_independent_gibbs <- function(
     parallel = FALSE,
     workers = NULL,
     compute_parameter_ess = TRUE,
+    retain_loading_second_moment = FALSE,
     align_retained_draws = TRUE,
     initial_state = NULL,
     initial_allocation = c("sample", "map"),
@@ -1226,9 +1285,15 @@ fit_viroli_probit_independent_gibbs <- function(
   keep_F <- matrix(0, n, H)
   keep_alpha <- numeric(p)
   keep_Lambda <- matrix(0, p, H)
+  keep_signal_covariance <- if (isTRUE(retain_loading_second_moment)) {
+    matrix(0, p, p)
+  } else {
+    NULL
+  }
   keep_pi <- matrix(0, H, G_max)
   keep_mu <- matrix(0, H, G_max)
   keep_sig2 <- matrix(0, H, G_max)
+  keep_probability <- matrix(0, n, p)
   keep_component_counts <- lapply(seq_len(H), function(h) {
     matrix(0L, n, G[h])
   })
@@ -1396,16 +1461,28 @@ fit_viroli_probit_independent_gibbs <- function(
             total_cost = 0
           )
         } else {
-          retained <- align_viroli_draw_to_reference(
-            reference_Lambda = alignment_reference_Lambda,
-            F = F,
-            Lambda = Lambda,
-            C = C,
-            pi_mat = pi_mat,
-            mu_mat = mu_mat,
-            sig2_mat = sig2_mat,
-            G = G
-          )
+          retained <- if (all(G == 1L) && !isTRUE(use_laplace_loading_prior)) {
+            align_viroli_gaussian_draw_to_reference(
+              reference_Lambda = alignment_reference_Lambda,
+              F = F,
+              Lambda = Lambda,
+              C = C,
+              pi_mat = pi_mat,
+              mu_mat = mu_mat,
+              sig2_mat = sig2_mat
+            )
+          } else {
+            align_viroli_draw_to_reference(
+              reference_Lambda = alignment_reference_Lambda,
+              F = F,
+              Lambda = Lambda,
+              C = C,
+              pi_mat = pi_mat,
+              mu_mat = mu_mat,
+              sig2_mat = sig2_mat,
+              G = G
+            )
+          }
         }
         n_permuted <- retained$alignment$n_permuted_factors
         n_sign_flips <- retained$alignment$n_sign_flips
@@ -1421,9 +1498,19 @@ fit_viroli_probit_independent_gibbs <- function(
       keep_F <- keep_F + retained$F
       keep_alpha <- keep_alpha + alpha
       keep_Lambda <- keep_Lambda + retained$Lambda
+      if (isTRUE(retain_loading_second_moment)) {
+        keep_signal_covariance <- keep_signal_covariance + tcrossprod(retained$Lambda)
+      }
       keep_pi <- keep_pi + replace(retained$pi, is.na(retained$pi), 0)
       keep_mu <- keep_mu + replace(retained$mu, is.na(retained$mu), 0)
       keep_sig2 <- keep_sig2 + replace(retained$sig2, is.na(retained$sig2), 0)
+      retained_eta <- sweep(
+        retained$F %*% t(retained$Lambda),
+        2L,
+        alpha,
+        "+"
+      )
+      keep_probability <- keep_probability + pnorm(retained_eta)
       n_keep <- n_keep + 1L
       last_aligned_C <- retained$C
       for (h in seq_len(H)) {
@@ -1462,6 +1549,11 @@ fit_viroli_probit_independent_gibbs <- function(
     F_hat <- keep_F / n_keep
     alpha_hat <- keep_alpha / n_keep
     Lambda_hat <- keep_Lambda / n_keep
+    posterior_mean_signal_covariance <- if (isTRUE(retain_loading_second_moment)) {
+      keep_signal_covariance / n_keep
+    } else {
+      NULL
+    }
     pi_hat <- keep_pi / n_keep
     mu_hat <- keep_mu / n_keep
     sig2_hat <- keep_sig2 / n_keep
@@ -1469,6 +1561,11 @@ fit_viroli_probit_independent_gibbs <- function(
     F_hat <- F
     alpha_hat <- alpha
     Lambda_hat <- Lambda
+    posterior_mean_signal_covariance <- if (isTRUE(retain_loading_second_moment)) {
+      tcrossprod(Lambda_hat)
+    } else {
+      NULL
+    }
     pi_hat <- pi_mat
     mu_hat <- mu_mat
     sig2_hat <- sig2_mat
@@ -1567,6 +1664,7 @@ fit_viroli_probit_independent_gibbs <- function(
     F_hat = F_hat,
     alpha_hat = alpha_hat,
     Lambda_hat = Lambda_hat,
+    posterior_mean_signal_covariance = posterior_mean_signal_covariance,
     C = component_posterior$profile_mode,
     C_last_draw = if (n_keep > 0L && isTRUE(align_retained_draws)) last_aligned_C else C,
     component_probabilities = component_posterior$probabilities,
@@ -1578,6 +1676,11 @@ fit_viroli_probit_independent_gibbs <- function(
     mu = mu_hat,
     sig2 = sig2_hat,
     mixture_fits = mixture_fits,
+    posterior_mean_probability = if (n_keep > 0L) {
+      keep_probability / n_keep
+    } else {
+      pnorm(sweep(F_hat %*% t(Lambda_hat), 2L, alpha_hat, "+"))
+    },
     history = history,
     ess_table = ess_table,
     ess_summary = ess_summary,

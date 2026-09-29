@@ -132,6 +132,11 @@ canonical_normalize_refined_fit <- function(
   fit$Lambda_hat <- norm$Lambda
   fit$alpha_hat <- norm$alpha
   fit$mixture_fits <- norm$mixture_fits
+  fit$G_hat <- vapply(
+    fit$mixture_fits,
+    function(mixture_fit) length(mixture_fit$pi),
+    integer(1)
+  )
   fit$canonical_normalization <- norm[
     c(
       "location_before",

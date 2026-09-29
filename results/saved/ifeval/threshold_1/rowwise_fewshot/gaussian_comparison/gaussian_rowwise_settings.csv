@@ -1,0 +1,2 @@
+"H","prior","lambda_l1_penalty","n_iter","burn","thin","tau_lambda","tau_intercept","K_folds","reveal_fraction","reveal_repeats","factor_score_bound","prediction_rule","n_models","n_items"
+4,"standard_normal",4,2000,1000,1,1.5,5,5,0.200374531835206,3,5,"posterior_mean_parameters_plus_gaussian_MAP_factor",122,534
